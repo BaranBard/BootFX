@@ -5,4 +5,5 @@ edition = "2021"
 description = "Graphical video player that continues from ASCII boot handoff point"
 
 [dependencies]
-# TODO: add dependencies
+anyhow = "1"
+bootfx-core = { path = "../bootfx-core" }

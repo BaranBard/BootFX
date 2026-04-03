@@ -5,4 +5,6 @@ edition = "2021"
 description = "Offline tool: converts mp4 video to ASCII frames + manifest"
 
 [dependencies]
-# TODO: add dependencies
+anyhow = "1"
+bootfx-core = { path = "../bootfx-core" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

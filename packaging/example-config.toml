@@ -11,7 +11,12 @@ region_y = 24
 region_h = 16
 
 [animation]
-manifest = "/boot/boot-ui/intro/manifest.json"
+manifest = "/var/lib/boot-ui/intro/manifest.json"
 
 [handoff]
 write_state = "/run/boot-ui/state.json"
+
+[video]
+source = "/var/lib/boot-ui/intro/video.mp4"
+player = "mpv"
+args = ["--fullscreen"]

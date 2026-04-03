@@ -1,12 +1,19 @@
 [Unit]
 Description=BootFX ASCII Boot Animation
 DefaultDependencies=no
+After=local-fs.target
 After=systemd-journald.service
+Conflicts=getty@tty1.service
+Before=getty@tty1.service
 Before=graphical.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/boot-ui
+ExecStart=/usr/bin/boot-ui --config /etc/boot-ui/config.toml
+Restart=no
+RuntimeDirectory=boot-ui
+RuntimeDirectoryMode=0755
+RequiresMountsFor=/var/lib/boot-ui
 StandardInput=tty
 StandardOutput=tty
 TTYPath=/dev/tty1
@@ -14,4 +21,4 @@ TTYReset=yes
 TTYVHangup=yes
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target

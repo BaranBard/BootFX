@@ -1,6 +1,8 @@
 [workspace]
 members = [
+    "bootfx-core",
     "boot-ui",
     "boot-ui-precompute",
     "boot-video-player",
 ]
+resolver = "2"

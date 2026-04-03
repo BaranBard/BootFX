@@ -1,0 +1,9 @@
+[Unit]
+Description=BootFX Graphical Video Continuation Trigger
+
+[Path]
+PathExists=/run/boot-ui/state.json
+Unit=boot-video-player.service
+
+[Install]
+WantedBy=multi-user.target

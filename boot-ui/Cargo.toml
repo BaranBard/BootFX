@@ -5,4 +5,5 @@ edition = "2021"
 description = "Runtime ASCII boot animation renderer with systemd integration"
 
 [dependencies]
-# TODO: add dependencies
+anyhow = "1"
+bootfx-core = { path = "../bootfx-core" }
