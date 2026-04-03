@@ -28,6 +28,12 @@ What is not complete yet:
 - `boot-ui`: boot-time ASCII renderer
 - `boot-video-player`: post-boot resume player
 
+## Architecture And Logic
+
+For a detailed explanation of architecture, file responsibilities, abstractions, and core functions, see:
+
+- [StructureAndLogic.md](./StructureAndLogic.md)
+
 ## Arch Linux: Quick Start
 
 ### 1. Install dependencies
