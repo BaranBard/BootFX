@@ -1,0 +1,17 @@
+[Unit]
+Description=BootFX ASCII Boot Animation
+DefaultDependencies=no
+After=systemd-journald.service
+Before=graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/boot-ui
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,8 @@
+[package]
+name = "boot-ui"
+version = "0.1.0"
+edition = "2021"
+description = "Runtime ASCII boot animation renderer with systemd integration"
+
+[dependencies]
+# TODO: add dependencies

@@ -1,0 +1,8 @@
+[package]
+name = "boot-video-player"
+version = "0.1.0"
+edition = "2021"
+description = "Graphical video player that continues from ASCII boot handoff point"
+
+[dependencies]
+# TODO: add dependencies

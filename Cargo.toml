@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "boot-ui",
+    "boot-ui-precompute",
+    "boot-video-player",
+]

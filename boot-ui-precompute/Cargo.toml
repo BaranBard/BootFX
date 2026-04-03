@@ -1,0 +1,8 @@
+[package]
+name = "boot-ui-precompute"
+version = "0.1.0"
+edition = "2021"
+description = "Offline tool: converts mp4 video to ASCII frames + manifest"
+
+[dependencies]
+# TODO: add dependencies

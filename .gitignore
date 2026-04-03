@@ -1,0 +1,8 @@
+/target
+**/*.frame
+*.o
+*.so
+*.dylib
+state.json
+.idea/
+.vscode/

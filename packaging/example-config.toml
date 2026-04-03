@@ -1,0 +1,17 @@
+[screen]
+width = 120
+height = 40
+fps = 15
+
+[layering]
+order = ["animation", "systemd"]
+
+[overlay]
+region_y = 24
+region_h = 16
+
+[animation]
+manifest = "/boot/boot-ui/intro/manifest.json"
+
+[handoff]
+write_state = "/run/boot-ui/state.json"

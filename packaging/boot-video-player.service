@@ -1,0 +1,11 @@
+[Unit]
+Description=BootFX Graphical Video Continuation
+After=graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/boot-video-player
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=graphical.target
