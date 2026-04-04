@@ -21,6 +21,16 @@ use bootfx_core::{Config, Manifest, State, DEFAULT_CONFIG_PATH};
 struct Args {
     config_path: PathBuf,
     max_frames: Option<u64>,
+    force_console: bool,
+    donut_mode: bool,
+    hash_test_mode: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderMode {
+    Manifest,
+    Donut,
+    HashTest,
 }
 
 #[derive(Clone)]
@@ -157,26 +167,62 @@ fn run() -> Result<()> {
     }
 
     let manifest_path = PathBuf::from(&config.animation.manifest);
-    let manifest = Manifest::load_from_path(&manifest_path)?;
-    if let Some(log) = logger.as_ref() {
-        log.info(format!(
-            "manifest loaded: path={}, frames={}, size={}x{}, fps={}",
-            manifest_path.display(),
-            manifest.frame_count,
-            manifest.width,
-            manifest.height,
-            manifest.fps
-        ));
+    let mut render_mode = if args.hash_test_mode {
+        RenderMode::HashTest
+    } else if args.donut_mode {
+        RenderMode::Donut
+    } else {
+        RenderMode::Manifest
+    };
+    let mut manifest: Option<Manifest> = None;
+    let manifest_base_dir = manifest_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    if render_mode == RenderMode::Manifest {
+        match Manifest::load_from_path(&manifest_path) {
+            Ok(loaded) => {
+                if config.screen.width != loaded.width || config.screen.height != loaded.height {
+                    bail!(
+                        "screen dimensions in config ({}x{}) do not match manifest ({}x{})",
+                        config.screen.width,
+                        config.screen.height,
+                        loaded.width,
+                        loaded.height
+                    );
+                }
+                if let Some(log) = logger.as_ref() {
+                    log.info(format!(
+                        "manifest loaded: path={}, frames={}, size={}x{}, fps={}",
+                        manifest_path.display(),
+                        loaded.frame_count,
+                        loaded.width,
+                        loaded.height,
+                        loaded.fps
+                    ));
+                }
+                manifest = Some(loaded);
+            }
+            Err(err) => {
+                if manifest_path.exists() {
+                    return Err(err).with_context(|| {
+                        format!("failed to load manifest at {}", manifest_path.display())
+                    });
+                }
+                render_mode = RenderMode::Donut;
+                if let Some(log) = logger.as_ref() {
+                    log.warn(format!(
+                        "manifest missing at {}, switching to donut fallback",
+                        manifest_path.display()
+                    ));
+                }
+            }
+        }
     }
 
-    if config.screen.width != manifest.width || config.screen.height != manifest.height {
-        bail!(
-            "screen dimensions in config ({}x{}) do not match manifest ({}x{})",
-            config.screen.width,
-            config.screen.height,
-            manifest.width,
-            manifest.height
-        );
+    if let Some(log) = logger.as_ref() {
+        log.info(format!("render mode: {:?}", render_mode));
     }
 
     let width = config.screen.width as usize;
@@ -194,28 +240,32 @@ fn run() -> Result<()> {
     );
 
     let graphical_reached = Arc::new(AtomicBool::new(false));
-    spawn_graphical_target_watcher(graphical_reached.clone(), stop_flag.clone(), logger.clone());
+    if args.force_console {
+        if let Some(log) = logger.as_ref() {
+            log.info("force-console enabled: graphical target watcher disabled");
+        }
+    } else {
+        spawn_graphical_target_watcher(graphical_reached.clone(), stop_flag.clone(), logger.clone());
+    }
 
     let _term_guard = TerminalGuard::enter()?;
     if let Some(log) = logger.as_ref() {
         log.info("terminal initialized");
     }
 
-    let frame_interval = Duration::from_millis((1000 / config.screen.fps.max(1)) as u64);
-    let manifest_base_dir = manifest_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let fps = config.screen.fps.max(1) as u64;
+    let frame_interval = Duration::from_millis((1000 / fps).max(1));
 
     let mut last_state = State {
         frame_index: 0,
         pts_ms: 0,
     };
     let mut rendered_frames = 0u64;
-    let mut exit_reason = "completed: frame-list-exhausted".to_string();
+    let mut source_index = 0u64;
+    let mut exit_reason = "completed".to_string();
 
-    for (processed, frame) in manifest.frames.iter().enumerate() {
-        if graphical_reached.load(Ordering::Relaxed) {
+    loop {
+        if !args.force_console && graphical_reached.load(Ordering::Relaxed) {
             if let Some(log) = logger.as_ref() {
                 log.info("graphical.target reached, stopping frame loop");
             }
@@ -223,7 +273,7 @@ fn run() -> Result<()> {
             break;
         }
         if let Some(max_frames) = args.max_frames {
-            if processed as u64 >= max_frames {
+            if rendered_frames >= max_frames {
                 if let Some(log) = logger.as_ref() {
                     log.info(format!("debug max-frames reached: {}", max_frames));
                 }
@@ -231,18 +281,43 @@ fn run() -> Result<()> {
                 break;
             }
         }
-
-        let frame_path = manifest_base_dir.join(&frame.file);
-        let frame_bytes = fs::read(&frame_path)
-            .with_context(|| format!("failed to read frame {}", frame_path.display()))?;
-        if frame_bytes.len() != width * height {
-            bail!(
-                "frame {} has invalid size {} (expected {})",
-                frame_path.display(),
-                frame_bytes.len(),
-                width * height
-            );
-        }
+        let (frame_bytes, frame_index, pts_ms) = match render_mode {
+            RenderMode::Manifest => {
+                let loaded = manifest
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("manifest mode selected but manifest is missing"))?;
+                if source_index as usize >= loaded.frames.len() {
+                    exit_reason = "completed: frame-list-exhausted".to_string();
+                    break;
+                }
+                let frame = &loaded.frames[source_index as usize];
+                let frame_path = manifest_base_dir.join(&frame.file);
+                let frame_bytes = fs::read(&frame_path)
+                    .with_context(|| format!("failed to read frame {}", frame_path.display()))?;
+                if frame_bytes.len() != width * height {
+                    bail!(
+                        "frame {} has invalid size {} (expected {})",
+                        frame_path.display(),
+                        frame_bytes.len(),
+                        width * height
+                    );
+                }
+                source_index += 1;
+                (frame_bytes, frame.index, frame.pts_ms)
+            }
+            RenderMode::Donut => {
+                let idx = source_index;
+                source_index += 1;
+                let pts_ms = idx.saturating_mul(1000).saturating_div(fps);
+                (build_donut_frame(width, height, idx), idx, pts_ms)
+            }
+            RenderMode::HashTest => {
+                let idx = source_index;
+                source_index += 1;
+                let pts_ms = idx.saturating_mul(1000).saturating_div(fps);
+                (build_hash_frame(width, height), idx, pts_ms)
+            }
+        };
 
         let snapshot = snapshot_overlay_lines(&overlay_lines);
         let composed = compose_layers(
@@ -259,8 +334,8 @@ fn run() -> Result<()> {
             if let Some(log) = logger.as_ref() {
                 log.info(format!(
                     "frame rendered: index={}, pts_ms={}, overlay_lines={}",
-                    frame.index,
-                    frame.pts_ms,
+                    frame_index,
+                    pts_ms,
                     snapshot.len()
                 ));
             }
@@ -268,33 +343,43 @@ fn run() -> Result<()> {
         rendered_frames += 1;
 
         last_state = State {
-            frame_index: frame.index,
-            pts_ms: frame.pts_ms,
+            frame_index,
+            pts_ms,
         };
 
         let frame_start = Instant::now();
-        while frame_start.elapsed() < frame_interval {
-            thread::sleep(Duration::from_millis(1));
+        let elapsed = frame_start.elapsed();
+        if elapsed < frame_interval {
+            thread::sleep(frame_interval - elapsed);
         }
     }
 
     stop_flag.store(true, Ordering::Relaxed);
-    if let Some(log) = logger.as_ref() {
-        log.info("writing handoff state");
+    let should_write_handoff = !args.force_console && render_mode == RenderMode::Manifest;
+    if should_write_handoff {
+        if let Some(log) = logger.as_ref() {
+            log.info("writing handoff state");
+        }
+        write_handoff_state(&config, &last_state)?;
+        eprintln!(
+            "boot-ui wrote handoff state: frame_index={}, pts_ms={}",
+            last_state.frame_index, last_state.pts_ms
+        );
+        if let Some(log) = logger.as_ref() {
+            log.info(format!(
+                "handoff state written: frame_index={}, pts_ms={}, path={}",
+                last_state.frame_index,
+                last_state.pts_ms,
+                config.handoff.write_state
+            ));
+        }
+    } else {
+        eprintln!("boot-ui skipped handoff state write for current render mode");
+        if let Some(log) = logger.as_ref() {
+            log.info("handoff state write skipped for current render mode");
+        }
     }
-    write_handoff_state(&config, &last_state)?;
-
-    eprintln!(
-        "boot-ui wrote handoff state: frame_index={}, pts_ms={}",
-        last_state.frame_index, last_state.pts_ms
-    );
     if let Some(log) = logger.as_ref() {
-        log.info(format!(
-            "handoff state written: frame_index={}, pts_ms={}, path={}",
-            last_state.frame_index,
-            last_state.pts_ms,
-            config.handoff.write_state
-        ));
         if let Err(err) = log.flush_history_snapshot() {
             eprintln!("boot-ui failed to flush debug history: {err:#}");
         }
@@ -327,6 +412,9 @@ fn run() -> Result<()> {
 fn parse_args() -> Result<Args> {
     let mut config_path = PathBuf::from(DEFAULT_CONFIG_PATH);
     let mut max_frames = None;
+    let mut force_console = false;
+    let mut donut_mode = false;
+    let mut hash_test_mode = false;
 
     let mut iter = env::args().skip(1);
     while let Some(arg) = iter.next() {
@@ -350,13 +438,23 @@ fn parse_args() -> Result<Args> {
                         .with_context(|| format!("invalid --max-frames value `{val}`"))?,
                 );
             }
+            "--force-console" => force_console = true,
+            "--donut" => donut_mode = true,
+            "--hash-test" | "--hash-fill" => hash_test_mode = true,
             other => bail!("unknown argument `{other}`. Use --help"),
         }
+    }
+
+    if donut_mode && hash_test_mode {
+        bail!("`--donut` and `--hash-test` cannot be used together");
     }
 
     Ok(Args {
         config_path,
         max_frames,
+        force_console,
+        donut_mode,
+        hash_test_mode,
     })
 }
 
@@ -371,6 +469,9 @@ Usage:
 Options:
   --config <path>      Config TOML path (default: /etc/boot-ui/config.toml)
   --max-frames <n>     Process only the first N frames (debug)
+  --force-console      Ignore graphical.target and keep rendering until end/max-frames
+  --donut              Render built-in spinning 3D donut instead of manifest frames
+  --hash-test          Render fullscreen `#` symbols for visibility testing
 "
     );
 }
@@ -545,6 +646,73 @@ fn is_graphical_target_active(logger: Option<&DebugLogger>) -> bool {
     }
 
     output.status.success() && stdout == "active"
+}
+
+fn build_hash_frame(width: usize, height: usize) -> Vec<u8> {
+    vec![b'#'; width * height]
+}
+
+fn build_donut_frame(width: usize, height: usize, tick: u64) -> Vec<u8> {
+    let mut output = vec![b' '; width * height];
+    let mut zbuf = vec![0.0f32; width * height];
+    const SHADES: &[u8] = b".,-~:;=!*#$@";
+
+    let a = tick as f32 * 0.07;
+    let b = tick as f32 * 0.03;
+    let sin_a = a.sin();
+    let cos_a = a.cos();
+    let sin_b = b.sin();
+    let cos_b = b.cos();
+
+    let width_f = width as f32;
+    let height_f = height as f32;
+    let scale = (width_f.min(height_f) * 0.28).max(6.0);
+    let y_scale = 0.55f32;
+
+    let mut theta = 0.0f32;
+    while theta < std::f32::consts::TAU {
+        let sin_t = theta.sin();
+        let cos_t = theta.cos();
+
+        let mut phi = 0.0f32;
+        while phi < std::f32::consts::TAU {
+            let sin_p = phi.sin();
+            let cos_p = phi.cos();
+
+            let circle_x = 2.0 + cos_t;
+            let circle_y = sin_t;
+
+            let x =
+                circle_x * (cos_b * cos_p + sin_a * sin_b * sin_p) - circle_y * cos_a * sin_b;
+            let y =
+                circle_x * (sin_b * cos_p - sin_a * cos_b * sin_p) + circle_y * cos_a * cos_b;
+            let z = cos_a * circle_x * sin_p + circle_y * sin_a + 5.0;
+            let ooz = 1.0 / z;
+
+            let xp = (width_f * 0.5 + scale * ooz * x) as isize;
+            let yp = (height_f * 0.5 + scale * y_scale * ooz * y) as isize;
+
+            if xp >= 0 && xp < width as isize && yp >= 0 && yp < height as isize {
+                let idx = yp as usize * width + xp as usize;
+                if ooz > zbuf[idx] {
+                    zbuf[idx] = ooz;
+                    let luminance = cos_p * cos_t * sin_b
+                        - cos_a * cos_t * sin_p
+                        - sin_a * sin_t
+                        + cos_b * (cos_a * sin_t - cos_t * sin_a * sin_p);
+                    let raw = ((luminance + 1.0) * 0.5 * (SHADES.len() as f32 - 1.0)) as isize;
+                    let shade = raw.clamp(0, SHADES.len() as isize - 1) as usize;
+                    output[idx] = SHADES[shade];
+                }
+            }
+
+            phi += 0.045;
+        }
+
+        theta += 0.020;
+    }
+
+    output
 }
 
 fn compose_layers(

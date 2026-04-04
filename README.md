@@ -60,6 +60,7 @@ bash packaging/install-arch.sh --video /absolute/path/to/intro.mp4 --mode graysc
 ```
 
 If you skip `--video`, script will install everything except frame assets.
+In that case `boot-ui` can fall back to built-in donut mode.
 
 ### 4. Reboot and test
 
@@ -122,6 +123,23 @@ sudo /usr/bin/boot-ui-precompute \
 sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --max-frames 120
 sudo /usr/bin/boot-video-player --config /etc/boot-ui/config.toml --dry-run
 ```
+
+Manual fullscreen render checks (single-command modes):
+
+```bash
+# Force console rendering even when graphical.target is already active
+sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --max-frames 600
+
+# Built-in spinning ASCII 3D donut (no manifest/video required)
+sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --donut --max-frames 600
+
+# Fullscreen hash-fill test to verify output path
+sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --hash-test --max-frames 240
+```
+
+Notes:
+- Test modes with `--force-console` do not write `/run/boot-ui/state.json` (so `boot-video-player.path` is not triggered).
+- Built-in fallback to donut is automatic when `manifest.json` is missing.
 
 ### 6. Enable units
 
@@ -251,6 +269,10 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
 
 - `boot-ui` exits immediately:
   - Verify `manifest.json` exists and frame files are readable.
+  - For manual checks on a running desktop, use:
+    - `sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --max-frames 600`
+  - If no precomputed video assets are available, use:
+    - `sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --donut --max-frames 600`
 - `boot-video-player` does not start:
   - Verify `/run/boot-ui/state.json` exists after `boot-ui` run.
   - Check `boot-video-player.path` is enabled and active.

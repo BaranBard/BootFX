@@ -160,21 +160,25 @@ BootFX состоит из двух фаз:
 
 `boot-ui/src/main.rs`:
 
-1. `parse_args()` — опции `--config`, `--max-frames`.
+1. `parse_args()` — опции `--config`, `--max-frames`, `--force-console`, `--donut`, `--hash-test`.
 2. `run()`:
-   - загрузка `Config` и `Manifest`
-   - проверка соответствия размеров экрана и манифеста
+   - загрузка `Config`
+   - выбор источника кадров:
+     - `Manifest` (обычный режим)
+     - fallback `Donut`, если `manifest.json` отсутствует
+     - принудительные тест-режимы CLI: `--donut` и `--hash-test`
+   - проверка соответствия размеров экрана и манифеста (в режиме manifest)
    - запуск фоновых задач:
      - `spawn_journal_reader(...)`
-     - `spawn_graphical_target_watcher(...)`
+     - `spawn_graphical_target_watcher(...)` (пропускается при `--force-console`)
    - вход в raw-like терминальный режим через `TerminalGuard::enter()`
    - цикл кадров:
-     - чтение `.frame`
+     - чтение `.frame` или генерация кадра (donut/hash-test)
      - снимок overlay (`snapshot_overlay_lines(...)`)
      - композиция слоев (`compose_layers(...)`)
      - вывод в терминал (`render_frame(...)`)
      - обновление `last_state`
-   - запись `state.json` через `write_handoff_state(...)`
+   - запись `state.json` через `write_handoff_state(...)` только в обычном boot-режиме (`manifest` без `--force-console`)
 
 ### Overlay-подсистема
 

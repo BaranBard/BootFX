@@ -18,6 +18,9 @@
 - Retention and cleanup options in config (age/count limits + log size rotation).
 - Session environment auto-detection in `boot-video-player` using `loginctl` and `/proc/<leader>/environ`.
 - New optional session override file: `/etc/boot-ui/video-session.env` (template in `packaging/video-session.env`).
+- New manual console rendering flag: `boot-ui --force-console` (ignores `graphical.target` stop condition).
+- New built-in fallback render mode: `boot-ui --donut` (spinning ASCII 3D donut).
+- New fullscreen output test mode: `boot-ui --hash-test` (fills screen with `#`).
 
 ### Changed
 
@@ -35,6 +38,8 @@
 - Wayland sessions without `XAUTHORITY` now avoid forced `DISPLAY=:0` fallback to prevent mpv X11 assertion crashes in some VM/display stacks.
 - `boot-video-player` now waits briefly for a usable graphical session env before launching the player, reducing early-boot race conditions.
 - Added SDDM xauth fallback detection from `/run/sddm/xauth_*` for systems where `loginctl` session data is not ready yet.
+- `boot-ui` now auto-falls back to donut mode when manifest file is missing (useful when no precomputed video assets are installed).
+- `boot-ui` now skips handoff state writes in test/forced modes (`--force-console`, `--donut`, `--hash-test`) to avoid accidental `boot-video-player.path` triggers during manual checks.
 
 ### Debug Artifacts
 
