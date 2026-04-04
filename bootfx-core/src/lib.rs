@@ -66,8 +66,23 @@ impl Config {
         if self.debug.history_file.trim().is_empty() {
             bail!("debug.history_file must not be empty");
         }
+        if self.debug.export_dir.trim().is_empty() {
+            bail!("debug.export_dir must not be empty");
+        }
         if self.debug.flush_every == 0 {
             bail!("debug.flush_every must be > 0");
+        }
+        if self.debug.max_artifact_age_days == 0 {
+            bail!("debug.max_artifact_age_days must be > 0");
+        }
+        if self.debug.max_artifacts == 0 {
+            bail!("debug.max_artifacts must be > 0");
+        }
+        if self.debug.max_log_size_mb == 0 {
+            bail!("debug.max_log_size_mb must be > 0");
+        }
+        if self.debug.max_history_size_mb == 0 {
+            bail!("debug.max_history_size_mb must be > 0");
         }
         Ok(())
     }
@@ -172,9 +187,16 @@ impl Default for VideoConfig {
 pub struct DebugConfig {
     pub log_file: String,
     pub history_file: String,
+    pub export_enabled: bool,
+    pub export_dir: String,
     pub flush_every: usize,
     pub log_frame_events: bool,
     pub log_overlay_events: bool,
+    pub cleanup_enabled: bool,
+    pub max_artifact_age_days: u64,
+    pub max_artifacts: usize,
+    pub max_log_size_mb: u64,
+    pub max_history_size_mb: u64,
 }
 
 impl Default for DebugConfig {
@@ -182,9 +204,16 @@ impl Default for DebugConfig {
         Self {
             log_file: "/var/log/boot-ui/boot-ui.log".to_string(),
             history_file: "/var/log/boot-ui/boot-ui-history.log".to_string(),
+            export_enabled: true,
+            export_dir: "/var/lib/boot-ui/debug".to_string(),
             flush_every: 64,
             log_frame_events: true,
             log_overlay_events: true,
+            cleanup_enabled: true,
+            max_artifact_age_days: 14,
+            max_artifacts: 40,
+            max_log_size_mb: 32,
+            max_history_size_mb: 16,
         }
     }
 }

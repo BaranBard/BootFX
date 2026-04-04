@@ -95,7 +95,11 @@ BootFX состоит из двух фаз:
 - `animation` (`manifest`)
 - `handoff` (`write_state`)
 - `video` (`source`, `player`, `args`)
-- `debug` (`log_file`, `history_file`, `flush_every`, флаги детализации логов)
+- `debug`:
+  - `log_file`, `history_file`
+  - `export_enabled`, `export_dir`
+  - `flush_every`, флаги детализации логов
+  - cleanup/retention параметры (`cleanup_enabled`, `max_artifact_age_days`, `max_artifacts`, `max_log_size_mb`, `max_history_size_mb`)
 
 Методы:
 
@@ -198,6 +202,15 @@ RAII-обертка:
 
 - при входе скрывает курсор и очищает экран
 - в `Drop` возвращает курсор и сбрасывает состояние терминала
+
+### Debug artifacts и retention
+
+- При завершении `boot-ui` формирует bundle в `debug`-директории проекта (`/var/lib/boot-ui/debug` по умолчанию):
+  - копии `config.toml`, `manifest.json`, `state.json`, `boot-ui.log`, `boot-ui-history.log`
+  - общий файл `debug-summary.txt`
+  - глобальный свежий агрегат `debug-latest.txt` в корне `debug/`
+- Автоочистка удаляет слишком старые debug-бандлы и ограничивает их количество.
+- При переполнении основных логов выполняется ротация (`*.old-<timestamp>`).
 
 ## 7. Логика `boot-video-player`
 

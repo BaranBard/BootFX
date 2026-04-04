@@ -102,6 +102,7 @@ By default, config expects assets in `/var/lib/boot-ui/intro`.
 
 ```bash
 sudo install -d -m755 /var/lib/boot-ui/intro
+sudo install -d -m755 /var/lib/boot-ui/debug
 sudo install -d -m755 /var/log/boot-ui
 sudo install -Dm644 /absolute/path/to/intro.mp4 /var/lib/boot-ui/intro/video.mp4
 
@@ -141,6 +142,8 @@ To reduce default boot noise, add `quiet splash` to kernel parameters.
 - Handoff state: `/run/boot-ui/state.json`
 - Debug log: `/var/log/boot-ui/boot-ui.log`
 - Debug history buffer snapshot: `/var/log/boot-ui/boot-ui-history.log`
+- Debug export directory (project-local artifacts): `/var/lib/boot-ui/debug/`
+- Latest combined debug file: `/var/lib/boot-ui/debug/debug-latest.txt`
 
 Default config example:
 
@@ -171,9 +174,16 @@ args = ["--fullscreen"]
 [debug]
 log_file = "/var/log/boot-ui/boot-ui.log"
 history_file = "/var/log/boot-ui/boot-ui-history.log"
+export_enabled = true
+export_dir = "/var/lib/boot-ui/debug"
 flush_every = 64
 log_frame_events = true
 log_overlay_events = true
+cleanup_enabled = true
+max_artifact_age_days = 14
+max_artifacts = 40
+max_log_size_mb = 32
+max_history_size_mb = 16
 ```
 
 ## Troubleshooting
@@ -193,6 +203,8 @@ journalctl -u boot-ui.service -b
 journalctl -u boot-video-player.service -b
 sudo tail -n 200 /var/log/boot-ui/boot-ui.log
 sudo tail -n 200 /var/log/boot-ui/boot-ui-history.log
+sudo ls -la /var/lib/boot-ui/debug
+sudo tail -n 200 /var/lib/boot-ui/debug/debug-latest.txt
 ```
 
 ### Files To Share For Debug Review
@@ -201,10 +213,12 @@ If animation did not play correctly, please send these files after one full boot
 
 ```text
 /etc/boot-ui/config.toml
-/var/log/boot-ui/boot-ui.log
-/var/log/boot-ui/boot-ui-history.log
+/var/lib/boot-ui/debug/debug-latest.txt
+/var/lib/boot-ui/debug/run-<latest>/debug-summary.txt
+/var/lib/boot-ui/debug/run-<latest>/boot-ui.log
+/var/lib/boot-ui/debug/run-<latest>/boot-ui-history.log
 /run/boot-ui/state.json
-/var/lib/boot-ui/intro/manifest.json
+/var/lib/boot-ui/debug/run-<latest>/manifest.json
 ```
 
 Also send command outputs:
@@ -242,6 +256,13 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
     - `sudo reboot`
 - Player window not visible in graphical session:
   - Your display stack may need custom `DISPLAY`/session setup; adjust `boot-video-player.service` accordingly.
+- Too many debug files/logs:
+  - Tune `[debug]` cleanup options:
+    - `cleanup_enabled`
+    - `max_artifact_age_days`
+    - `max_artifacts`
+    - `max_log_size_mb`
+    - `max_history_size_mb`
 
 ## Safe Rollback
 

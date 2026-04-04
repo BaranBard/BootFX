@@ -24,6 +24,13 @@ args = ["--fullscreen"]
 [debug]
 log_file = "/var/log/boot-ui/boot-ui.log"
 history_file = "/var/log/boot-ui/boot-ui-history.log"
+export_enabled = true
+export_dir = "/var/lib/boot-ui/debug"
 flush_every = 64
 log_frame_events = true
 log_overlay_events = true
+cleanup_enabled = true
+max_artifact_age_days = 14
+max_artifacts = 40
+max_log_size_mb = 32
+max_history_size_mb = 16

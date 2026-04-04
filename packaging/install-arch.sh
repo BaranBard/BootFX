@@ -105,6 +105,7 @@ sudo install -Dm644 "${ROOT_DIR}/packaging/boot-video-player.path" /etc/systemd/
 
 echo "[4/6] Preparing asset directory"
 sudo install -d -m755 "${ASSET_DIR}"
+sudo install -d -m755 /var/lib/boot-ui/debug
 sudo install -d -m755 /var/log/boot-ui
 
 if [[ -n "${VIDEO_INPUT}" ]]; then

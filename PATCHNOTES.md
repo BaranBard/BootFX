@@ -10,6 +10,12 @@
 - Configurable debug section in config (`[debug]`).
 - Systemd log directory creation via `LogsDirectory=boot-ui`.
 - Arch installer creates `/var/log/boot-ui`.
+- Automatic debug artifact export into project-local directory (`/var/lib/boot-ui/debug`).
+- Per-run debug bundle folders (`run-<timestamp>`) with copied files:
+  - `config.toml`, `manifest.json`, `state.json`, `boot-ui.log`, `boot-ui-history.log`
+  - combined `debug-summary.txt`
+- Global combined latest file: `/var/lib/boot-ui/debug/debug-latest.txt`.
+- Retention and cleanup options in config (age/count limits + log size rotation).
 
 ### Changed
 
@@ -19,6 +25,7 @@
 - `boot-ui.service` now preserves `/run/boot-ui` after service stop (`RuntimeDirectoryPreserve=yes`) so `state.json` survives handoff.
 - `RequiresMountsFor=/var/lib/boot-ui` moved to correct section `[Unit]`.
 - `boot-ui` install target switched to `basic.target` to start earlier in boot sequence.
+- `README.md` and `StructureAndLogic.md` expanded with debug bundle and cleanup workflow.
 
 ### Debug Artifacts
 
