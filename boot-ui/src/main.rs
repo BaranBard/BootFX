@@ -700,7 +700,7 @@ fn rotate_if_oversized(path: &Path, max_size_mb: u64) -> Result<Option<PathBuf>>
     let rotated_name = format!("{file_name}.old-{}", utc_millis());
     let rotated_path = path
         .parent()
-        .map(|dir| dir.join(rotated_name))
+        .map(|dir| dir.join(&rotated_name))
         .unwrap_or_else(|| PathBuf::from(rotated_name));
     fs::rename(path, &rotated_path).with_context(|| {
         format!(

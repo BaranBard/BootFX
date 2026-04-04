@@ -30,6 +30,7 @@
 - `README.md` and `StructureAndLogic.md` expanded with debug bundle and cleanup workflow.
 - `boot-video-player.service` now reads optional overrides from `/etc/boot-ui/video-session.env` and waits for `display-manager.service`.
 - Arch installer now installs `/etc/boot-ui/video-session.env` if missing.
+- Fixed Rust ownership bug in `boot-ui` log rotation path construction (`E0382` compile error on Arch).
 
 ### Debug Artifacts
 
