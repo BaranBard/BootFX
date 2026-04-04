@@ -102,6 +102,10 @@ fn run() -> Result<()> {
         }
     };
 
+    if !args.dry_run {
+        consume_state_file(&args.state_path);
+    }
+
     let video_path = select_video_path(&args, &config)?;
     let player = choose_player(&config);
     let mut command = build_player_command(&player, &config.video.args, &video_path, state.pts_ms);
@@ -297,7 +301,7 @@ fn resolve_session_env() -> ResolvedSessionEnv {
         }
     }
 
-    if resolved.display.is_none() {
+    if resolved.display.is_none() && resolved.wayland_display.is_none() {
         resolved.display = Some(":0".to_string());
         resolved.add_source("display-fallback");
     }
@@ -306,17 +310,51 @@ fn resolve_session_env() -> ResolvedSessionEnv {
 }
 
 fn apply_session_env(command: &mut Command, session_env: &ResolvedSessionEnv) {
-    if let Some(value) = &session_env.display {
+    let prefer_wayland_only = session_env.wayland_display.is_some() && session_env.xauthority.is_none();
+
+    if prefer_wayland_only {
+        command.env_remove("DISPLAY");
+        eprintln!(
+            "boot-video-player: wayland session without XAUTHORITY detected; skipping DISPLAY to avoid X11 fallback"
+        );
+    } else if let Some(value) = &session_env.display {
         command.env("DISPLAY", value);
+    } else {
+        command.env_remove("DISPLAY");
     }
     if let Some(value) = &session_env.xdg_runtime_dir {
         command.env("XDG_RUNTIME_DIR", value);
+    } else {
+        command.env_remove("XDG_RUNTIME_DIR");
     }
     if let Some(value) = &session_env.xauthority {
         command.env("XAUTHORITY", value);
+    } else {
+        command.env_remove("XAUTHORITY");
     }
     if let Some(value) = &session_env.wayland_display {
         command.env("WAYLAND_DISPLAY", value);
+    } else {
+        command.env_remove("WAYLAND_DISPLAY");
+    }
+}
+
+fn consume_state_file(state_path: &Path) {
+    match fs::remove_file(state_path) {
+        Ok(()) => {
+            eprintln!(
+                "boot-video-player: consumed state file and removed {}",
+                state_path.display()
+            );
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            eprintln!(
+                "boot-video-player: warning: failed to remove state file {}: {}",
+                state_path.display(),
+                err
+            );
+        }
     }
 }
 

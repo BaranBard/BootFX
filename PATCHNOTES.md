@@ -31,6 +31,8 @@
 - `boot-video-player.service` now reads optional overrides from `/etc/boot-ui/video-session.env` and waits for `display-manager.service`.
 - Arch installer now installs `/etc/boot-ui/video-session.env` if missing.
 - Fixed Rust ownership bug in `boot-ui` log rotation path construction (`E0382` compile error on Arch).
+- `boot-video-player` now consumes/removes `/run/boot-ui/state.json` after reading it to prevent repeated `.path` retriggers on player failure.
+- Wayland sessions without `XAUTHORITY` now avoid forced `DISPLAY=:0` fallback to prevent mpv X11 assertion crashes in some VM/display stacks.
 
 ### Debug Artifacts
 

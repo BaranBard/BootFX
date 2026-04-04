@@ -222,9 +222,11 @@ RAII-обертка:
 2. `run()`:
    - загрузка `Config`
    - чтение `State` (или `0ms`, если файла нет)
+   - удаление (consume) `state.json` после чтения, чтобы избежать повторных trigger-циклов `.path` при падении плеера
    - выбор пути видео (`select_video_path(...)`)
    - выбор плеера (`choose_player(...)`)
    - автоопределение параметров графической сессии через `loginctl` и `/proc/<leader>/environ` (DISPLAY/XDG_RUNTIME_DIR/XAUTHORITY/WAYLAND_DISPLAY)
+   - для Wayland-сессий без `XAUTHORITY` не устанавливается fallback `DISPLAY=:0`, чтобы не провоцировать X11 crash-path в `mpv`
    - сбор команды (`build_player_command(...)`)
    - запуск плеера (кроме `--dry-run`)
 

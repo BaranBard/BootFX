@@ -261,6 +261,7 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
     - `sudo reboot`
 - Player window not visible in graphical session:
   - `boot-video-player` now auto-detects session env via `loginctl` + `/proc/<leader>/environ`.
+  - For Wayland sessions without X11 auth, `boot-video-player` now avoids `DISPLAY` fallback to prevent `mpv` X11 crash paths.
   - If you still see `Authorization required` or `XDG_RUNTIME_DIR is invalid`, fill `/etc/boot-ui/video-session.env`, for example:
     - `DISPLAY=:0`
     - `XDG_RUNTIME_DIR=/run/user/<uid>`
@@ -270,6 +271,10 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
     - `sudo systemctl restart boot-video-player.path`
   - Recheck:
     - `journalctl -u boot-video-player.service -b --no-pager`
+- `boot-video-player.path` / `boot-video-player.service` enters `start-limit-hit`:
+  - Reset failed state and restart trigger:
+    - `sudo systemctl reset-failed boot-video-player.service boot-video-player.path`
+    - `sudo systemctl restart boot-video-player.path`
 - Too many debug files/logs:
   - Tune `[debug]` cleanup options:
     - `cleanup_enabled`
