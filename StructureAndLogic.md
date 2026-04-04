@@ -226,6 +226,8 @@ RAII-обертка:
 - Запускает `boot-ui --config /etc/boot-ui/config.toml`
 - Работает с `TTYPath=/dev/tty1`
 - Готовит runtime dir `/run/boot-ui` через `RuntimeDirectory=boot-ui`
+- Сохраняет runtime dir после остановки через `RuntimeDirectoryPreserve=yes` (важно для handoff `state.json`)
+- Включается в `basic.target`, чтобы стартовать раньше `graphical.target`
 
 ### `boot-video-player.path`
 

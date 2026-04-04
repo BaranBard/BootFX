@@ -235,6 +235,11 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
 - `boot-video-player` does not start:
   - Verify `/run/boot-ui/state.json` exists after `boot-ui` run.
   - Check `boot-video-player.path` is enabled and active.
+- `/run/boot-ui/state.json` is missing right after `boot-ui` exit:
+  - Make sure your `boot-ui.service` contains `RuntimeDirectoryPreserve=yes` in `[Service]`.
+  - Reload units and reboot:
+    - `sudo systemctl daemon-reload`
+    - `sudo reboot`
 - Player window not visible in graphical session:
   - Your display stack may need custom `DISPLAY`/session setup; adjust `boot-video-player.service` accordingly.
 

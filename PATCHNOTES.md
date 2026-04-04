@@ -16,6 +16,9 @@
 - `boot-ui` now records startup, manifest load, frame events, overlay events, watcher checks, and handoff write events.
 - `README.md` includes runtime debug files and commands to collect a debug bundle.
 - `StructureAndLogic.md` updated to include `debug` config abstraction.
+- `boot-ui.service` now preserves `/run/boot-ui` after service stop (`RuntimeDirectoryPreserve=yes`) so `state.json` survives handoff.
+- `RequiresMountsFor=/var/lib/boot-ui` moved to correct section `[Unit]`.
+- `boot-ui` install target switched to `basic.target` to start earlier in boot sequence.
 
 ### Debug Artifacts
 
