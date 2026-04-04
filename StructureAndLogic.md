@@ -95,6 +95,7 @@ BootFX состоит из двух фаз:
 - `animation` (`manifest`)
 - `handoff` (`write_state`)
 - `video` (`source`, `player`, `args`)
+- `debug` (`log_file`, `history_file`, `flush_every`, флаги детализации логов)
 
 Методы:
 
@@ -269,4 +270,3 @@ RAII-обертка:
 4. Добавить тесты:
    - unit-тесты для парсинга/валидации config/manifest/state
    - smoke-тесты pipeline precompute -> boot-ui -> state.
-

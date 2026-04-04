@@ -5,14 +5,14 @@
 
 use std::collections::VecDeque;
 use std::env;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use bootfx_core::{Config, Manifest, State, DEFAULT_CONFIG_PATH};
@@ -21,6 +21,96 @@ use bootfx_core::{Config, Manifest, State, DEFAULT_CONFIG_PATH};
 struct Args {
     config_path: PathBuf,
     max_frames: Option<u64>,
+}
+
+#[derive(Clone)]
+struct DebugLogger {
+    log_file: Arc<Mutex<fs::File>>,
+    history: Arc<Mutex<Vec<String>>>,
+    history_path: PathBuf,
+    flush_every: usize,
+}
+
+impl DebugLogger {
+    fn new(log_path: &Path, history_path: &Path, flush_every: usize) -> Result<Self> {
+        if let Some(parent) = log_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create debug log directory: {}", parent.display())
+            })?;
+        }
+        if let Some(parent) = history_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create debug history directory: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+            .with_context(|| format!("failed to open debug log file: {}", log_path.display()))?;
+
+        Ok(Self {
+            log_file: Arc::new(Mutex::new(file)),
+            history: Arc::new(Mutex::new(Vec::new())),
+            history_path: history_path.to_path_buf(),
+            flush_every,
+        })
+    }
+
+    fn info(&self, message: impl AsRef<str>) {
+        self.log("INFO", message.as_ref());
+    }
+
+    fn warn(&self, message: impl AsRef<str>) {
+        self.log("WARN", message.as_ref());
+    }
+
+    fn error(&self, message: impl AsRef<str>) {
+        self.log("ERROR", message.as_ref());
+    }
+
+    fn log(&self, level: &str, message: &str) {
+        let ts = utc_millis();
+        let line = format!("{ts} [{level}] {message}");
+
+        if let Ok(mut file) = self.log_file.lock() {
+            let _ = writeln!(file, "{line}");
+            let _ = file.flush();
+        }
+
+        let mut should_flush = false;
+        if let Ok(mut history) = self.history.lock() {
+            history.push(line);
+            if history.len() % self.flush_every == 0 {
+                should_flush = true;
+            }
+        }
+
+        if should_flush {
+            let _ = self.flush_history_snapshot();
+        }
+    }
+
+    fn flush_history_snapshot(&self) -> Result<()> {
+        let snapshot = {
+            let history = self
+                .history
+                .lock()
+                .map_err(|_| anyhow!("debug history mutex is poisoned"))?;
+            history.join("\n")
+        };
+        fs::write(&self.history_path, snapshot).with_context(|| {
+            format!(
+                "failed to write debug history file: {}",
+                self.history_path.display()
+            )
+        })?;
+        Ok(())
+    }
 }
 
 fn main() {
@@ -33,9 +123,48 @@ fn main() {
 fn run() -> Result<()> {
     let args = parse_args()?;
     let config = Config::load_from_path(&args.config_path)?;
+    let logger = match DebugLogger::new(
+        Path::new(&config.debug.log_file),
+        Path::new(&config.debug.history_file),
+        config.debug.flush_every,
+    ) {
+        Ok(logger) => Some(logger),
+        Err(err) => {
+            eprintln!("boot-ui debug logger init failed: {err:#}");
+            None
+        }
+    };
+
+    if let Some(log) = logger.clone() {
+        let old_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            log.error(format!("panic captured: {panic_info}"));
+            let _ = log.flush_history_snapshot();
+            old_hook(panic_info);
+        }));
+    }
+
+    if let Some(log) = logger.as_ref() {
+        log.info(format!(
+            "boot-ui startup: config_path={}, log_file={}, history_file={}",
+            args.config_path.display(),
+            config.debug.log_file,
+            config.debug.history_file
+        ));
+    }
 
     let manifest_path = PathBuf::from(&config.animation.manifest);
     let manifest = Manifest::load_from_path(&manifest_path)?;
+    if let Some(log) = logger.as_ref() {
+        log.info(format!(
+            "manifest loaded: path={}, frames={}, size={}x{}, fps={}",
+            manifest_path.display(),
+            manifest.frame_count,
+            manifest.width,
+            manifest.height,
+            manifest.fps
+        ));
+    }
 
     if config.screen.width != manifest.width || config.screen.height != manifest.height {
         bail!(
@@ -53,12 +182,21 @@ fn run() -> Result<()> {
     let overlay_capacity = config.overlay.region_h.max(1) as usize;
     let overlay_lines = Arc::new(Mutex::new(VecDeque::<String>::with_capacity(overlay_capacity)));
     let stop_flag = Arc::new(AtomicBool::new(false));
-    spawn_journal_reader(overlay_lines.clone(), overlay_capacity, stop_flag.clone());
+    spawn_journal_reader(
+        overlay_lines.clone(),
+        overlay_capacity,
+        stop_flag.clone(),
+        logger.clone(),
+        config.debug.log_overlay_events,
+    );
 
     let graphical_reached = Arc::new(AtomicBool::new(false));
-    spawn_graphical_target_watcher(graphical_reached.clone(), stop_flag.clone());
+    spawn_graphical_target_watcher(graphical_reached.clone(), stop_flag.clone(), logger.clone());
 
     let _term_guard = TerminalGuard::enter()?;
+    if let Some(log) = logger.as_ref() {
+        log.info("terminal initialized");
+    }
 
     let frame_interval = Duration::from_millis((1000 / config.screen.fps.max(1)) as u64);
     let manifest_base_dir = manifest_path
@@ -73,10 +211,16 @@ fn run() -> Result<()> {
 
     for (processed, frame) in manifest.frames.iter().enumerate() {
         if graphical_reached.load(Ordering::Relaxed) {
+            if let Some(log) = logger.as_ref() {
+                log.info("graphical.target reached, stopping frame loop");
+            }
             break;
         }
         if let Some(max_frames) = args.max_frames {
             if processed as u64 >= max_frames {
+                if let Some(log) = logger.as_ref() {
+                    log.info(format!("debug max-frames reached: {}", max_frames));
+                }
                 break;
             }
         }
@@ -104,6 +248,16 @@ fn run() -> Result<()> {
             &config.layering.order,
         );
         render_frame(&composed, width, height)?;
+        if config.debug.log_frame_events {
+            if let Some(log) = logger.as_ref() {
+                log.info(format!(
+                    "frame rendered: index={}, pts_ms={}, overlay_lines={}",
+                    frame.index,
+                    frame.pts_ms,
+                    snapshot.len()
+                ));
+            }
+        }
 
         last_state = State {
             frame_index: frame.index,
@@ -117,12 +271,26 @@ fn run() -> Result<()> {
     }
 
     stop_flag.store(true, Ordering::Relaxed);
+    if let Some(log) = logger.as_ref() {
+        log.info("writing handoff state");
+    }
     write_handoff_state(&config, &last_state)?;
 
     eprintln!(
         "boot-ui wrote handoff state: frame_index={}, pts_ms={}",
         last_state.frame_index, last_state.pts_ms
     );
+    if let Some(log) = logger.as_ref() {
+        log.info(format!(
+            "handoff state written: frame_index={}, pts_ms={}, path={}",
+            last_state.frame_index,
+            last_state.pts_ms,
+            config.handoff.write_state
+        ));
+        if let Err(err) = log.flush_history_snapshot() {
+            eprintln!("boot-ui failed to flush debug history: {err:#}");
+        }
+    }
 
     Ok(())
 }
@@ -182,8 +350,14 @@ fn spawn_journal_reader(
     overlay: Arc<Mutex<VecDeque<String>>>,
     capacity: usize,
     stop: Arc<AtomicBool>,
+    logger: Option<DebugLogger>,
+    log_overlay_events: bool,
 ) {
     thread::spawn(move || {
+        if let Some(log) = logger.as_ref() {
+            log.info("journal reader thread started");
+        }
+
         let mut child = match Command::new("journalctl")
             .args(["-b", "-f", "-n", "0", "-o", "cat"])
             .stdout(Stdio::piped())
@@ -192,6 +366,9 @@ fn spawn_journal_reader(
         {
             Ok(child) => child,
             Err(err) => {
+                if let Some(log) = logger.as_ref() {
+                    log.warn(format!("journalctl spawn failed: {err}"));
+                }
                 push_overlay_line(
                     &overlay,
                     capacity,
@@ -204,6 +381,9 @@ fn spawn_journal_reader(
         let stdout = match child.stdout.take() {
             Some(stream) => stream,
             None => {
+                if let Some(log) = logger.as_ref() {
+                    log.warn("journalctl stdout pipe unavailable");
+                }
                 push_overlay_line(
                     &overlay,
                     capacity,
@@ -222,6 +402,11 @@ fn spawn_journal_reader(
             match line {
                 Ok(raw) => {
                     let formatted = classify_journal_line(raw);
+                    if log_overlay_events {
+                        if let Some(log) = logger.as_ref() {
+                            log.info(format!("overlay event: {formatted}"));
+                        }
+                    }
                     push_overlay_line(&overlay, capacity, formatted);
                 }
                 Err(_) => break,
@@ -229,6 +414,9 @@ fn spawn_journal_reader(
         }
 
         let _ = child.kill();
+        if let Some(log) = logger.as_ref() {
+            log.info("journal reader thread stopped");
+        }
     });
 }
 
@@ -280,27 +468,54 @@ fn snapshot_overlay_lines(overlay: &Arc<Mutex<VecDeque<String>>>) -> Vec<String>
         .unwrap_or_default()
 }
 
-fn spawn_graphical_target_watcher(reached: Arc<AtomicBool>, stop: Arc<AtomicBool>) {
+fn spawn_graphical_target_watcher(
+    reached: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    logger: Option<DebugLogger>,
+) {
     thread::spawn(move || {
+        if let Some(log) = logger.as_ref() {
+            log.info("graphical target watcher started");
+        }
         while !stop.load(Ordering::Relaxed) && !reached.load(Ordering::Relaxed) {
-            if is_graphical_target_active() {
+            if is_graphical_target_active(logger.as_ref()) {
                 reached.store(true, Ordering::Relaxed);
+                if let Some(log) = logger.as_ref() {
+                    log.info("graphical.target is active");
+                }
                 break;
             }
             thread::sleep(Duration::from_secs(1));
         }
+        if let Some(log) = logger.as_ref() {
+            log.info("graphical target watcher stopped");
+        }
     });
 }
 
-fn is_graphical_target_active() -> bool {
-    Command::new("systemctl")
+fn is_graphical_target_active(logger: Option<&DebugLogger>) -> bool {
+    let output = match Command::new("systemctl")
         .args(["is-active", "graphical.target"])
         .output()
-        .ok()
-        .map(|output| {
-            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "active"
-        })
-        .unwrap_or(false)
+    {
+        Ok(output) => output,
+        Err(err) => {
+            if let Some(log) = logger {
+                log.warn(format!("systemctl is-active call failed: {err}"));
+            }
+            return false;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let Some(log) = logger {
+        log.info(format!(
+            "systemctl is-active graphical.target: status={}, output={}",
+            output.status, stdout
+        ));
+    }
+
+    output.status.success() && stdout == "active"
 }
 
 fn compose_layers(
@@ -396,6 +611,13 @@ fn write_handoff_state(config: &Config, state: &State) -> Result<()> {
     state
         .write_to_path(&state_path)
         .with_context(|| format!("failed to write handoff state to {}", state_path.display()))
+}
+
+fn utc_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 struct TerminalGuard;

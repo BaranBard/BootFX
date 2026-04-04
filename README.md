@@ -33,6 +33,7 @@ What is not complete yet:
 For a detailed explanation of architecture, file responsibilities, abstractions, and core functions, see:
 
 - [StructureAndLogic.md](./StructureAndLogic.md)
+- [PATCHNOTES.md](./PATCHNOTES.md)
 
 ## Arch Linux: Quick Start
 
@@ -101,6 +102,7 @@ By default, config expects assets in `/var/lib/boot-ui/intro`.
 
 ```bash
 sudo install -d -m755 /var/lib/boot-ui/intro
+sudo install -d -m755 /var/log/boot-ui
 sudo install -Dm644 /absolute/path/to/intro.mp4 /var/lib/boot-ui/intro/video.mp4
 
 sudo /usr/bin/boot-ui-precompute \
@@ -137,6 +139,8 @@ To reduce default boot noise, add `quiet splash` to kernel parameters.
 - Config: `/etc/boot-ui/config.toml`
 - Assets: `/var/lib/boot-ui/intro/`
 - Handoff state: `/run/boot-ui/state.json`
+- Debug log: `/var/log/boot-ui/boot-ui.log`
+- Debug history buffer snapshot: `/var/log/boot-ui/boot-ui-history.log`
 
 Default config example:
 
@@ -163,6 +167,13 @@ write_state = "/run/boot-ui/state.json"
 source = "/var/lib/boot-ui/intro/video.mp4"
 player = "mpv"
 args = ["--fullscreen"]
+
+[debug]
+log_file = "/var/log/boot-ui/boot-ui.log"
+history_file = "/var/log/boot-ui/boot-ui-history.log"
+flush_every = 64
+log_frame_events = true
+log_overlay_events = true
 ```
 
 ## Troubleshooting
@@ -180,6 +191,41 @@ systemctl status boot-video-player.service
 ```bash
 journalctl -u boot-ui.service -b
 journalctl -u boot-video-player.service -b
+sudo tail -n 200 /var/log/boot-ui/boot-ui.log
+sudo tail -n 200 /var/log/boot-ui/boot-ui-history.log
+```
+
+### Files To Share For Debug Review
+
+If animation did not play correctly, please send these files after one full boot attempt:
+
+```text
+/etc/boot-ui/config.toml
+/var/log/boot-ui/boot-ui.log
+/var/log/boot-ui/boot-ui-history.log
+/run/boot-ui/state.json
+/var/lib/boot-ui/intro/manifest.json
+```
+
+Also send command outputs:
+
+```bash
+systemctl status boot-ui.service --no-pager
+systemctl status boot-video-player.service --no-pager
+systemctl status boot-video-player.path --no-pager
+journalctl -u boot-ui.service -b --no-pager
+journalctl -u boot-video-player.service -b --no-pager
+```
+
+Optional single bundle command:
+
+```bash
+sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
+  /etc/boot-ui/config.toml \
+  /var/log/boot-ui/boot-ui.log \
+  /var/log/boot-ui/boot-ui-history.log \
+  /run/boot-ui/state.json \
+  /var/lib/boot-ui/intro/manifest.json
 ```
 
 ### Common issues

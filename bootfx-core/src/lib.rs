@@ -16,6 +16,7 @@ pub struct Config {
     pub animation: AnimationConfig,
     pub handoff: HandoffConfig,
     pub video: VideoConfig,
+    pub debug: DebugConfig,
 }
 
 impl Default for Config {
@@ -27,6 +28,7 @@ impl Default for Config {
             animation: AnimationConfig::default(),
             handoff: HandoffConfig::default(),
             video: VideoConfig::default(),
+            debug: DebugConfig::default(),
         }
     }
 }
@@ -57,6 +59,15 @@ impl Config {
         }
         if self.handoff.write_state.trim().is_empty() {
             bail!("handoff.write_state must not be empty");
+        }
+        if self.debug.log_file.trim().is_empty() {
+            bail!("debug.log_file must not be empty");
+        }
+        if self.debug.history_file.trim().is_empty() {
+            bail!("debug.history_file must not be empty");
+        }
+        if self.debug.flush_every == 0 {
+            bail!("debug.flush_every must be > 0");
         }
         Ok(())
     }
@@ -152,6 +163,28 @@ impl Default for VideoConfig {
             source: "/var/lib/boot-ui/intro/video.mp4".to_string(),
             player: "mpv".to_string(),
             args: vec!["--fullscreen".to_string()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DebugConfig {
+    pub log_file: String,
+    pub history_file: String,
+    pub flush_every: usize,
+    pub log_frame_events: bool,
+    pub log_overlay_events: bool,
+}
+
+impl Default for DebugConfig {
+    fn default() -> Self {
+        Self {
+            log_file: "/var/log/boot-ui/boot-ui.log".to_string(),
+            history_file: "/var/log/boot-ui/boot-ui-history.log".to_string(),
+            flush_every: 64,
+            log_frame_events: true,
+            log_overlay_events: true,
         }
     }
 }

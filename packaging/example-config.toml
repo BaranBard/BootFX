@@ -20,3 +20,10 @@ write_state = "/run/boot-ui/state.json"
 source = "/var/lib/boot-ui/intro/video.mp4"
 player = "mpv"
 args = ["--fullscreen"]
+
+[debug]
+log_file = "/var/log/boot-ui/boot-ui.log"
+history_file = "/var/log/boot-ui/boot-ui-history.log"
+flush_every = 64
+log_frame_events = true
+log_overlay_events = true
