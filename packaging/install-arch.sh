@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="/etc/boot-ui/config.toml"
+SESSION_ENV_PATH="/etc/boot-ui/video-session.env"
 ASSET_DIR="/var/lib/boot-ui/intro"
 
 VIDEO_INPUT=""
@@ -97,6 +98,13 @@ if ! sudo test -f "${CONFIG_PATH}"; then
   echo "Installed default config: ${CONFIG_PATH}"
 else
   echo "Config already exists, keeping current file: ${CONFIG_PATH}"
+fi
+
+if ! sudo test -f "${SESSION_ENV_PATH}"; then
+  sudo install -Dm644 "${ROOT_DIR}/packaging/video-session.env" "${SESSION_ENV_PATH}"
+  echo "Installed session env template: ${SESSION_ENV_PATH}"
+else
+  echo "Session env already exists, keeping current file: ${SESSION_ENV_PATH}"
 fi
 
 sudo install -Dm644 "${ROOT_DIR}/packaging/boot-ui.service" /etc/systemd/system/boot-ui.service

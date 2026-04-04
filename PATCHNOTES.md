@@ -16,6 +16,8 @@
   - combined `debug-summary.txt`
 - Global combined latest file: `/var/lib/boot-ui/debug/debug-latest.txt`.
 - Retention and cleanup options in config (age/count limits + log size rotation).
+- Session environment auto-detection in `boot-video-player` using `loginctl` and `/proc/<leader>/environ`.
+- New optional session override file: `/etc/boot-ui/video-session.env` (template in `packaging/video-session.env`).
 
 ### Changed
 
@@ -26,6 +28,8 @@
 - `RequiresMountsFor=/var/lib/boot-ui` moved to correct section `[Unit]`.
 - `boot-ui` install target switched to `basic.target` to start earlier in boot sequence.
 - `README.md` and `StructureAndLogic.md` expanded with debug bundle and cleanup workflow.
+- `boot-video-player.service` now reads optional overrides from `/etc/boot-ui/video-session.env` and waits for `display-manager.service`.
+- Arch installer now installs `/etc/boot-ui/video-session.env` if missing.
 
 ### Debug Artifacts
 

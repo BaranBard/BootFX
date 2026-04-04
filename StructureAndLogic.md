@@ -80,6 +80,8 @@ BootFX состоит из двух фаз:
   systemd unit для графического продолжения.
 - `packaging/boot-video-player.path`  
   Триггер запуска видео-плеера по появлению `state.json`.
+- `packaging/video-session.env`
+  Optional override file for graphical session variables (`DISPLAY`, `XDG_RUNTIME_DIR`, `XAUTHORITY`, `WAYLAND_DISPLAY`).
 - `packaging/install-arch.sh`  
   Установочный скрипт под Arch Linux.
 
@@ -222,6 +224,7 @@ RAII-обертка:
    - чтение `State` (или `0ms`, если файла нет)
    - выбор пути видео (`select_video_path(...)`)
    - выбор плеера (`choose_player(...)`)
+   - автоопределение параметров графической сессии через `loginctl` и `/proc/<leader>/environ` (DISPLAY/XDG_RUNTIME_DIR/XAUTHORITY/WAYLAND_DISPLAY)
    - сбор команды (`build_player_command(...)`)
    - запуск плеера (кроме `--dry-run`)
 
@@ -251,6 +254,8 @@ RAII-обертка:
 
 - Запускает `boot-video-player` с путями к config и state
 - Содержит `ConditionPathExists=/run/boot-ui/state.json`
+- Читает опциональный override-файл `/etc/boot-ui/video-session.env`
+- Упорядочен после `display-manager.service` для более надежной графической сессии перед запуском плеера
 
 ## 9. Форматы данных
 

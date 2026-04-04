@@ -1,13 +1,15 @@
 [Unit]
 Description=BootFX Graphical Video Continuation
 After=graphical.target
+After=display-manager.service
 After=boot-ui.service
+Wants=display-manager.service
 ConditionPathExists=/run/boot-ui/state.json
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/boot-video-player --config /etc/boot-ui/config.toml --state /run/boot-ui/state.json
-Environment=DISPLAY=:0
+EnvironmentFile=-/etc/boot-ui/video-session.env
 Restart=no
 
 [Install]

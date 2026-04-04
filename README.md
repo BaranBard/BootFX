@@ -88,6 +88,7 @@ sudo install -Dm755 target/release/boot-video-player /usr/bin/boot-video-player
 ```bash
 sudo install -d -m755 /etc/boot-ui
 sudo install -Dm644 packaging/example-config.toml /etc/boot-ui/config.toml
+sudo install -Dm644 packaging/video-session.env /etc/boot-ui/video-session.env
 
 sudo install -Dm644 packaging/boot-ui.service /etc/systemd/system/boot-ui.service
 sudo install -Dm644 packaging/boot-video-player.service /etc/systemd/system/boot-video-player.service
@@ -138,6 +139,7 @@ To reduce default boot noise, add `quiet splash` to kernel parameters.
 ## Runtime Files
 
 - Config: `/etc/boot-ui/config.toml`
+- Player session env overrides: `/etc/boot-ui/video-session.env`
 - Assets: `/var/lib/boot-ui/intro/`
 - Handoff state: `/run/boot-ui/state.json`
 - Debug log: `/var/log/boot-ui/boot-ui.log`
@@ -205,6 +207,7 @@ sudo tail -n 200 /var/log/boot-ui/boot-ui.log
 sudo tail -n 200 /var/log/boot-ui/boot-ui-history.log
 sudo ls -la /var/lib/boot-ui/debug
 sudo tail -n 200 /var/lib/boot-ui/debug/debug-latest.txt
+sudo cat /etc/boot-ui/video-session.env
 ```
 
 ### Files To Share For Debug Review
@@ -213,6 +216,7 @@ If animation did not play correctly, please send these files after one full boot
 
 ```text
 /etc/boot-ui/config.toml
+/etc/boot-ui/video-session.env
 /var/lib/boot-ui/debug/debug-latest.txt
 /var/lib/boot-ui/debug/run-<latest>/debug-summary.txt
 /var/lib/boot-ui/debug/run-<latest>/boot-ui.log
@@ -229,6 +233,7 @@ systemctl status boot-video-player.service --no-pager
 systemctl status boot-video-player.path --no-pager
 journalctl -u boot-ui.service -b --no-pager
 journalctl -u boot-video-player.service -b --no-pager
+loginctl list-sessions --no-legend
 ```
 
 Optional single bundle command:
@@ -255,7 +260,16 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
     - `sudo systemctl daemon-reload`
     - `sudo reboot`
 - Player window not visible in graphical session:
-  - Your display stack may need custom `DISPLAY`/session setup; adjust `boot-video-player.service` accordingly.
+  - `boot-video-player` now auto-detects session env via `loginctl` + `/proc/<leader>/environ`.
+  - If you still see `Authorization required` or `XDG_RUNTIME_DIR is invalid`, fill `/etc/boot-ui/video-session.env`, for example:
+    - `DISPLAY=:0`
+    - `XDG_RUNTIME_DIR=/run/user/<uid>`
+    - `XAUTHORITY=/var/lib/sddm/.Xauthority` (typical for SDDM greeter on X11)
+  - Apply changes:
+    - `sudo systemctl daemon-reload`
+    - `sudo systemctl restart boot-video-player.path`
+  - Recheck:
+    - `journalctl -u boot-video-player.service -b --no-pager`
 - Too many debug files/logs:
   - Tune `[debug]` cleanup options:
     - `cleanup_enabled`
@@ -286,6 +300,7 @@ bootfx/
 |  |- boot-ui.service
 |  |- boot-video-player.service
 |  |- boot-video-player.path
+|  |- video-session.env
 |  |- example-config.toml
 |  '- install-arch.sh
 |- assets/
