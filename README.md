@@ -261,6 +261,8 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
     - `sudo reboot`
 - Player window not visible in graphical session:
   - `boot-video-player` now auto-detects session env via `loginctl` + `/proc/<leader>/environ`.
+  - Startup now waits a short window for a usable session env (`Wayland + XDG_RUNTIME_DIR` or `X11 + XAUTHORITY`) before launching the player.
+  - If `loginctl` session data is not ready yet, SDDM fallback is used from `/run/sddm/xauth_*`.
   - For Wayland sessions without X11 auth, `boot-video-player` now avoids `DISPLAY` fallback to prevent `mpv` X11 crash paths.
   - If you still see `Authorization required` or `XDG_RUNTIME_DIR is invalid`, fill `/etc/boot-ui/video-session.env`, for example:
     - `DISPLAY=:0`

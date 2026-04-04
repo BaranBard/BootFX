@@ -7,6 +7,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use bootfx_core::{Config, State, DEFAULT_CONFIG_PATH, DEFAULT_STATE_PATH};
@@ -110,7 +112,7 @@ fn run() -> Result<()> {
     let player = choose_player(&config);
     let mut command = build_player_command(&player, &config.video.args, &video_path, state.pts_ms);
 
-    let session_env = resolve_session_env();
+    let session_env = resolve_session_env_with_wait();
     apply_session_env(&mut command, &session_env);
 
     eprintln!(
@@ -273,6 +275,43 @@ fn build_player_command(
     command
 }
 
+fn resolve_session_env_with_wait() -> ResolvedSessionEnv {
+    const SESSION_WAIT_MAX: Duration = Duration::from_secs(18);
+    const SESSION_WAIT_STEP: Duration = Duration::from_millis(600);
+
+    let start = std::time::Instant::now();
+    let mut attempts = 0u32;
+    let mut last = ResolvedSessionEnv::default();
+
+    loop {
+        attempts += 1;
+        let current = resolve_session_env();
+
+        if session_env_is_usable(&current) {
+            if attempts > 1 {
+                eprintln!(
+                    "boot-video-player: session env became usable after {} attempts ({} ms)",
+                    attempts,
+                    start.elapsed().as_millis()
+                );
+            }
+            return current;
+        }
+
+        last = current;
+        if start.elapsed() >= SESSION_WAIT_MAX {
+            eprintln!(
+                "boot-video-player: session env did not become fully usable after {} attempts ({} ms), continuing with best effort",
+                attempts,
+                start.elapsed().as_millis()
+            );
+            return last;
+        }
+
+        thread::sleep(SESSION_WAIT_STEP);
+    }
+}
+
 fn resolve_session_env() -> ResolvedSessionEnv {
     let mut resolved = ResolvedSessionEnv::default();
 
@@ -298,6 +337,21 @@ fn resolve_session_env() -> ResolvedSessionEnv {
         Ok(None) => {}
         Err(err) => {
             eprintln!("boot-video-player: session autodetect via loginctl failed: {err:#}");
+        }
+    }
+
+    if resolved.xauthority.is_none() {
+        if let Some(path) = detect_sddm_xauthority() {
+            resolved.xauthority = Some(path);
+            resolved.add_source("sddm-xauth-fallback");
+        }
+    }
+
+    if resolved.xdg_runtime_dir.is_none() {
+        let sddm_runtime = Path::new("/run/sddm");
+        if sddm_runtime.is_dir() {
+            resolved.xdg_runtime_dir = Some(sddm_runtime.to_string_lossy().to_string());
+            resolved.add_source("sddm-runtime-fallback");
         }
     }
 
@@ -339,6 +393,12 @@ fn apply_session_env(command: &mut Command, session_env: &ResolvedSessionEnv) {
     }
 }
 
+fn session_env_is_usable(session_env: &ResolvedSessionEnv) -> bool {
+    let has_wayland = session_env.wayland_display.is_some() && session_env.xdg_runtime_dir.is_some();
+    let has_x11 = session_env.display.is_some() && session_env.xauthority.is_some();
+    has_wayland || has_x11
+}
+
 fn consume_state_file(state_path: &Path) {
     match fs::remove_file(state_path) {
         Ok(()) => {
@@ -356,6 +416,33 @@ fn consume_state_file(state_path: &Path) {
             );
         }
     }
+}
+
+fn detect_sddm_xauthority() -> Option<String> {
+    let sddm_dir = Path::new("/run/sddm");
+    let entries = fs::read_dir(sddm_dir).ok()?;
+
+    let mut candidates: Vec<(PathBuf, SystemTime)> = Vec::new();
+    for entry in entries {
+        let entry = entry.ok()?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = path.file_name()?.to_string_lossy();
+        if !file_name.starts_with("xauth_") {
+            continue;
+        }
+        let modified = fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .unwrap_or(UNIX_EPOCH);
+        candidates.push((path, modified));
+    }
+
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates
+        .first()
+        .map(|(path, _)| path.to_string_lossy().to_string())
 }
 
 fn detect_session_env_from_loginctl() -> Result<Option<ResolvedSessionEnv>> {

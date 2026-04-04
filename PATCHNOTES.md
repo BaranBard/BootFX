@@ -33,6 +33,8 @@
 - Fixed Rust ownership bug in `boot-ui` log rotation path construction (`E0382` compile error on Arch).
 - `boot-video-player` now consumes/removes `/run/boot-ui/state.json` after reading it to prevent repeated `.path` retriggers on player failure.
 - Wayland sessions without `XAUTHORITY` now avoid forced `DISPLAY=:0` fallback to prevent mpv X11 assertion crashes in some VM/display stacks.
+- `boot-video-player` now waits briefly for a usable graphical session env before launching the player, reducing early-boot race conditions.
+- Added SDDM xauth fallback detection from `/run/sddm/xauth_*` for systems where `loginctl` session data is not ready yet.
 
 ### Debug Artifacts
 
