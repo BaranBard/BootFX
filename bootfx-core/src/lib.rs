@@ -17,6 +17,7 @@ pub struct Config {
     pub handoff: HandoffConfig,
     pub video: VideoConfig,
     pub sddm: SddmConfig,
+    pub interaction: InteractionConfig,
     pub debug: DebugConfig,
 }
 
@@ -30,6 +31,7 @@ impl Default for Config {
             handoff: HandoffConfig::default(),
             video: VideoConfig::default(),
             sddm: SddmConfig::default(),
+            interaction: InteractionConfig::default(),
             debug: DebugConfig::default(),
         }
     }
@@ -70,6 +72,9 @@ impl Config {
         }
         if self.sddm.video_background_enabled && self.sddm.video_path.trim().is_empty() {
             bail!("sddm.video_path must not be empty when sddm.video_background_enabled=true");
+        }
+        if self.interaction.stop_combo.trim().is_empty() {
+            bail!("interaction.stop_combo must not be empty");
         }
         if self.debug.log_file.trim().is_empty() {
             bail!("debug.log_file must not be empty");
@@ -211,6 +216,26 @@ impl Default for SddmConfig {
             theme_root: "/usr/share/sddm/themes".to_string(),
             video_path: "/var/lib/boot-ui/intro/video.mp4".to_string(),
             launch_external_player: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InteractionConfig {
+    pub force_text_mode: bool,
+    pub stop_combo: String,
+    pub any_key_to_login: bool,
+    pub start_login_on_stop: bool,
+}
+
+impl Default for InteractionConfig {
+    fn default() -> Self {
+        Self {
+            force_text_mode: false,
+            stop_combo: "ctrl+q".to_string(),
+            any_key_to_login: false,
+            start_login_on_stop: false,
         }
     }
 }

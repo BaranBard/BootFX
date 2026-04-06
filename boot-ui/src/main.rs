@@ -6,16 +6,17 @@
 use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
-use bootfx_core::{Config, Manifest, State, DEFAULT_CONFIG_PATH};
+use bootfx_core::{Config, InteractionConfig, Manifest, State, DEFAULT_CONFIG_PATH};
 
 #[derive(Debug)]
 struct Args {
@@ -31,6 +32,21 @@ enum RenderMode {
     Manifest,
     Donut,
     HashTest,
+}
+
+#[derive(Debug, Clone)]
+struct InputControl {
+    force_text_mode: bool,
+    any_key_to_login: bool,
+    start_login_on_stop: bool,
+    stop_combo_label: String,
+    stop_combo_bytes: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum InputEvent {
+    StopCombo,
+    AnyKey,
 }
 
 #[derive(Clone)]
@@ -165,6 +181,17 @@ fn run() -> Result<()> {
             config.debug.history_file
         ));
     }
+    let input_control = build_input_control(&config.interaction)?;
+    let force_text_mode = args.force_console || input_control.force_text_mode;
+    if let Some(log) = logger.as_ref() {
+        log.info(format!(
+            "interaction config: force_text_mode={}, any_key_to_login={}, stop_combo={}, start_login_on_stop={}",
+            force_text_mode,
+            input_control.any_key_to_login,
+            input_control.stop_combo_label,
+            input_control.start_login_on_stop
+        ));
+    }
 
     let manifest_path = PathBuf::from(&config.animation.manifest);
     let mut render_mode = if args.hash_test_mode {
@@ -240,9 +267,9 @@ fn run() -> Result<()> {
     );
 
     let graphical_reached = Arc::new(AtomicBool::new(false));
-    if args.force_console {
+    if force_text_mode {
         if let Some(log) = logger.as_ref() {
-            log.info("force-console enabled: graphical target watcher disabled");
+            log.info("force text mode enabled: graphical target watcher disabled");
         }
     } else {
         spawn_graphical_target_watcher(graphical_reached.clone(), stop_flag.clone(), logger.clone());
@@ -252,6 +279,11 @@ fn run() -> Result<()> {
     if let Some(log) = logger.as_ref() {
         log.info("terminal initialized");
     }
+    let input_rx = spawn_keyboard_input_reader(
+        stop_flag.clone(),
+        input_control.clone(),
+        logger.clone(),
+    );
 
     let fps = config.screen.fps.max(1) as u64;
     let frame_interval = Duration::from_millis((1000 / fps).max(1));
@@ -263,9 +295,42 @@ fn run() -> Result<()> {
     let mut rendered_frames = 0u64;
     let mut source_index = 0u64;
     let mut exit_reason = "completed".to_string();
+    let mut handoff_blocked_by_input = false;
 
-    loop {
-        if !args.force_console && graphical_reached.load(Ordering::Relaxed) {
+    'frame_loop: loop {
+        if let Some(rx) = input_rx.as_ref() {
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    InputEvent::StopCombo => {
+                        if let Some(log) = logger.as_ref() {
+                            log.info(format!(
+                                "keyboard hotkey received: {}, stopping playback",
+                                input_control.stop_combo_label
+                            ));
+                        }
+                        exit_reason = format!(
+                            "stopped: playback disabled via hotkey {}",
+                            input_control.stop_combo_label
+                        );
+                        handoff_blocked_by_input = true;
+                        if input_control.start_login_on_stop {
+                            let _ = request_login_environment(logger.as_ref());
+                        }
+                        break 'frame_loop;
+                    }
+                    InputEvent::AnyKey => {
+                        if let Some(log) = logger.as_ref() {
+                            log.info("keyboard input received: requesting login environment");
+                        }
+                        exit_reason = "stopped: keyboard input requested login screen".to_string();
+                        handoff_blocked_by_input = true;
+                        let _ = request_login_environment(logger.as_ref());
+                        break 'frame_loop;
+                    }
+                }
+            }
+        }
+        if !force_text_mode && graphical_reached.load(Ordering::Relaxed) {
             if let Some(log) = logger.as_ref() {
                 log.info("graphical.target reached, stopping frame loop");
             }
@@ -355,7 +420,8 @@ fn run() -> Result<()> {
     }
 
     stop_flag.store(true, Ordering::Relaxed);
-    let should_write_handoff = !args.force_console && render_mode == RenderMode::Manifest;
+    let should_write_handoff =
+        !force_text_mode && render_mode == RenderMode::Manifest && !handoff_blocked_by_input;
     if should_write_handoff {
         if let Some(log) = logger.as_ref() {
             log.info("writing handoff state");
@@ -438,7 +504,7 @@ fn parse_args() -> Result<Args> {
                         .with_context(|| format!("invalid --max-frames value `{val}`"))?,
                 );
             }
-            "--force-console" => force_console = true,
+            "--force-console" | "--force-text" => force_console = true,
             "--donut" => donut_mode = true,
             "--hash-test" | "--hash-fill" => hash_test_mode = true,
             other => bail!("unknown argument `{other}`. Use --help"),
@@ -470,10 +536,203 @@ Options:
   --config <path>      Config TOML path (default: /etc/boot-ui/config.toml)
   --max-frames <n>     Process only the first N frames (debug)
   --force-console      Ignore graphical.target and keep rendering until end/max-frames
+  --force-text         Alias for --force-console
   --donut              Render built-in spinning 3D donut instead of manifest frames
   --hash-test          Render fullscreen `#` symbols for visibility testing
 "
     );
+}
+
+fn build_input_control(cfg: &InteractionConfig) -> Result<InputControl> {
+    let stop_combo_label = cfg.stop_combo.trim().to_string();
+    let stop_combo_bytes = parse_stop_combo(&cfg.stop_combo)?;
+    Ok(InputControl {
+        force_text_mode: cfg.force_text_mode,
+        any_key_to_login: cfg.any_key_to_login,
+        start_login_on_stop: cfg.start_login_on_stop,
+        stop_combo_label,
+        stop_combo_bytes,
+    })
+}
+
+fn parse_stop_combo(combo: &str) -> Result<Option<Vec<u8>>> {
+    let normalized = combo.trim().to_ascii_lowercase();
+    if normalized.is_empty()
+        || normalized == "none"
+        || normalized == "off"
+        || normalized == "disabled"
+    {
+        return Ok(None);
+    }
+
+    if normalized == "esc" || normalized == "escape" {
+        return Ok(Some(vec![0x1b]));
+    }
+    if normalized == "enter" || normalized == "return" {
+        return Ok(Some(vec![b'\n']));
+    }
+
+    if let Some(raw) = normalized.strip_prefix("ctrl+") {
+        if raw.len() == 1 {
+            let ch = raw.as_bytes()[0];
+            if ch.is_ascii_alphabetic() {
+                return Ok(Some(vec![ch.to_ascii_lowercase() & 0x1f]));
+            }
+        }
+        bail!(
+            "unsupported interaction.stop_combo `{}` (expected ctrl+<letter>, e.g. ctrl+q)",
+            combo
+        );
+    }
+
+    if let Some(raw) = normalized.strip_prefix("alt+") {
+        if raw.len() == 1 {
+            let ch = raw.as_bytes()[0];
+            if ch.is_ascii_graphic() {
+                return Ok(Some(vec![0x1b, ch]));
+            }
+        }
+        bail!(
+            "unsupported interaction.stop_combo `{}` (expected alt+<char>, e.g. alt+q)",
+            combo
+        );
+    }
+
+    if let Some(hex) = normalized.strip_prefix("0x") {
+        let value = u8::from_str_radix(hex, 16)
+            .with_context(|| format!("invalid hex byte in interaction.stop_combo `{combo}`"))?;
+        return Ok(Some(vec![value]));
+    }
+
+    if normalized.len() == 1 {
+        return Ok(Some(vec![normalized.as_bytes()[0]]));
+    }
+
+    bail!(
+        "unsupported interaction.stop_combo `{}`; supported formats: ctrl+q, alt+q, q, esc, enter, none",
+        combo
+    );
+}
+
+fn spawn_keyboard_input_reader(
+    stop: Arc<AtomicBool>,
+    input_control: InputControl,
+    logger: Option<DebugLogger>,
+) -> Option<Receiver<InputEvent>> {
+    if !input_control.any_key_to_login && input_control.stop_combo_bytes.is_none() {
+        if let Some(log) = logger.as_ref() {
+            log.info("keyboard input controls disabled");
+        }
+        return None;
+    }
+
+    let (tx, rx) = mpsc::channel::<InputEvent>();
+    thread::spawn(move || {
+        if let Some(log) = logger.as_ref() {
+            log.info("keyboard input reader started");
+        }
+        let mut stdin = io::stdin().lock();
+        let mut byte = [0u8; 1];
+        let mut recent = VecDeque::<u8>::new();
+        let max_combo_len = input_control
+            .stop_combo_bytes
+            .as_ref()
+            .map(|seq| seq.len())
+            .unwrap_or(1)
+            .max(1);
+
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            match stdin.read(&mut byte) {
+                Ok(0) => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Ok(_) => {
+                    let b = byte[0];
+                    if input_control.any_key_to_login {
+                        let _ = tx.send(InputEvent::AnyKey);
+                        break;
+                    }
+
+                    if let Some(stop_seq) = input_control.stop_combo_bytes.as_ref() {
+                        recent.push_back(b);
+                        while recent.len() > max_combo_len {
+                            recent.pop_front();
+                        }
+                        if sequence_matches_tail(&recent, stop_seq) {
+                            let _ = tx.send(InputEvent::StopCombo);
+                            break;
+                        }
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => {
+                    if let Some(log) = logger.as_ref() {
+                        log.warn(format!("keyboard input reader failed: {err}"));
+                    }
+                    break;
+                }
+            }
+        }
+        if let Some(log) = logger.as_ref() {
+            log.info("keyboard input reader stopped");
+        }
+    });
+
+    Some(rx)
+}
+
+fn sequence_matches_tail(recent: &VecDeque<u8>, seq: &[u8]) -> bool {
+    if recent.len() < seq.len() {
+        return false;
+    }
+    recent
+        .iter()
+        .skip(recent.len() - seq.len())
+        .zip(seq.iter())
+        .all(|(lhs, rhs)| lhs == rhs)
+}
+
+fn request_login_environment(logger: Option<&DebugLogger>) -> bool {
+    let attempts: [(&str, [&str; 2]); 2] = [
+        ("display-manager", ["start", "display-manager.service"]),
+        ("graphical-target", ["start", "graphical.target"]),
+    ];
+
+    for (label, args) in attempts {
+        let status = Command::new("systemctl").args(args).status();
+        match status {
+            Ok(status) if status.success() => {
+                if let Some(log) = logger {
+                    log.info(format!(
+                        "login environment request succeeded via {} ({})",
+                        label, status
+                    ));
+                }
+                return true;
+            }
+            Ok(status) => {
+                if let Some(log) = logger {
+                    log.warn(format!(
+                        "login environment request via {} failed: {}",
+                        label, status
+                    ));
+                }
+            }
+            Err(err) => {
+                if let Some(log) = logger {
+                    log.warn(format!(
+                        "login environment request via {} errored: {}",
+                        label, err
+                    ));
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn spawn_journal_reader(
@@ -1106,22 +1365,48 @@ fn utc_millis() -> u128 {
         .unwrap_or(0)
 }
 
-struct TerminalGuard;
+struct TerminalGuard {
+    saved_tty_mode: Option<String>,
+}
 
 impl TerminalGuard {
     fn enter() -> Result<Self> {
+        let saved_tty_mode = configure_tty_for_immediate_input();
         let mut stdout = io::stdout().lock();
         stdout
             .write_all(b"\x1b[?25l\x1b[2J\x1b[H")
             .context("failed to initialize terminal")?;
         stdout.flush().context("failed to flush terminal init")?;
-        Ok(Self)
+        Ok(Self { saved_tty_mode })
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        if let Some(saved_mode) = self.saved_tty_mode.as_ref() {
+            let _ = Command::new("stty").arg(saved_mode).status();
+        }
         let _ = io::stdout().write_all(b"\x1b[?25h\x1b[0m\n");
         let _ = io::stdout().flush();
+    }
+}
+
+fn configure_tty_for_immediate_input() -> Option<String> {
+    let saved_mode = Command::new("stty").arg("-g").output().ok().and_then(|out| {
+        if out.status.success() {
+            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        } else {
+            None
+        }
+    })?;
+
+    let status = Command::new("stty")
+        .args(["-echo", "-icanon", "-isig", "-ixon", "min", "1", "time", "0"])
+        .status()
+        .ok()?;
+    if status.success() {
+        Some(saved_mode)
+    } else {
+        None
     }
 }

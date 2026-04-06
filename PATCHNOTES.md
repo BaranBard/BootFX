@@ -16,6 +16,14 @@
   - `--sddm-theme`
   - `--sddm-theme-root`
   - installs helper to `/usr/bin/bootfx-patch-sddm-theme`
+- New `[interaction]` config section in `bootfx-core`:
+  - `force_text_mode`
+  - `stop_combo`
+  - `any_key_to_login`
+  - `start_login_on_stop`
+- Runtime keyboard control in `boot-ui`:
+  - configurable stop hotkey to disable playback
+  - optional any-key-to-login mode
 
 ### Changed
 
@@ -24,6 +32,8 @@
   - can skip external player launch when `sddm.launch_external_player=false`
   - supports `--dry-run` reporting for planned SDDM update
 - `boot-video-player.service` ordering changed to run before `display-manager.service` (after `boot-ui.service`) so SDDM config updates can happen earlier in boot.
+- `boot-ui` now can force text rendering past `graphical.target` via config (`interaction.force_text_mode=true`) in addition to CLI `--force-console`.
+- `boot-ui` now skips handoff write when interrupted by keyboard control events to avoid accidental graphical continuation triggers.
 - `README.md` updated with SDDM setup, rollback, and troubleshooting steps.
 - `StructureAndLogic.md` updated with SDDM continuation architecture notes.
 

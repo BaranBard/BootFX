@@ -322,3 +322,22 @@ Important behavior note:
 - Updating `theme.conf.user` and launching external player are both handled by `boot-video-player`.
 - For pure SDDM handoff flow, set `launch_external_player=false` in `[sddm]`.
 - `boot-video-player.service` is ordered before `display-manager.service` in packaging to allow early SDDM config update.
+
+## 12. Interactive Keyboard Control (boot-ui)
+
+BootFX now supports runtime keyboard control configured via `[interaction]`:
+
+- `force_text_mode`:
+  - keeps text rendering running even when `graphical.target` is already active.
+- `stop_combo`:
+  - hotkey to stop ASCII playback (`ctrl+q`, `alt+q`, `q`, `esc`, `enter`, `none`).
+- `any_key_to_login`:
+  - when `true`, first keyboard input requests transition to login environment.
+- `start_login_on_stop`:
+  - when `true`, pressing `stop_combo` also requests login environment.
+
+Implementation notes:
+
+- `boot-ui` starts a keyboard reader thread and checks control events in the frame loop.
+- `any_key_to_login` and stop hotkey interrupts disable handoff-state write to avoid accidental graphical continuation trigger.
+- Login transition request is performed via `systemctl start display-manager.service` with fallback to `systemctl start graphical.target`.

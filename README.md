@@ -149,6 +149,9 @@ sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --hash-t
 Notes:
 - Test modes with `--force-console` do not write `/run/boot-ui/state.json` (so `boot-video-player.path` is not triggered).
 - Built-in fallback to donut is automatic when `manifest.json` is missing.
+- Runtime keyboard controls (configured in `[interaction]`):
+  - `stop_combo = "ctrl+q"` disables playback and exits `boot-ui`.
+  - `any_key_to_login = true` makes any key press immediately request login environment.
 
 ### 6. Enable units
 
@@ -198,6 +201,24 @@ Notes:
 sudo /usr/bin/bootfx-patch-sddm-theme --disable --theme breeze --theme-root /usr/share/sddm/themes
 ```
 
+## Interaction Modes
+
+You can control text playback behavior directly from `/etc/boot-ui/config.toml`:
+
+```toml
+[interaction]
+force_text_mode = true
+stop_combo = "ctrl+q"
+any_key_to_login = false
+start_login_on_stop = false
+```
+
+Meaning:
+- `force_text_mode=true` keeps text rendering active even after `graphical.target` becomes active.
+- `stop_combo` defines a hotkey to stop playback (`ctrl+q`, `alt+q`, `q`, `esc`, `enter`, `none`).
+- `any_key_to_login=true` switches to login environment on first key press.
+- `start_login_on_stop=true` also requests login environment when `stop_combo` is pressed.
+
 ## Runtime Files
 
 - Config: `/etc/boot-ui/config.toml`
@@ -243,6 +264,12 @@ theme = "breeze"
 theme_root = "/usr/share/sddm/themes"
 video_path = "/var/lib/boot-ui/intro/video.mp4"
 launch_external_player = true
+
+[interaction]
+force_text_mode = false
+stop_combo = "ctrl+q"
+any_key_to_login = false
+start_login_on_stop = false
 
 [debug]
 log_file = "/var/log/boot-ui/boot-ui.log"
@@ -327,6 +354,10 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
     - `sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --max-frames 600`
   - If no precomputed video assets are available, use:
     - `sudo /usr/bin/boot-ui --config /etc/boot-ui/config.toml --force-console --donut --max-frames 600`
+- Hotkeys do not react:
+  - Check `[interaction]` in config (`stop_combo`, `any_key_to_login`).
+  - Ensure service runs with TTY input (`StandardInput=tty`, `TTYPath=/dev/tty1` in `boot-ui.service`).
+  - Try a simple combo first: `stop_combo = "q"` for validation.
 - `boot-video-player` does not start:
   - Verify `/run/boot-ui/state.json` exists after `boot-ui` run.
   - Check `boot-video-player.path` is enabled and active.
