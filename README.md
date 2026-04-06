@@ -56,7 +56,15 @@ cd BootFX
 Use installer script (it builds, installs binaries, installs units/config, optionally precomputes assets):
 
 ```bash
-bash packaging/install-arch.sh --video /absolute/path/to/intro.mp4 --mode grayscale --fps 15 --width 120 --height 40 --enable
+bash packaging/install-arch.sh \
+  --video /absolute/path/to/intro.mp4 \
+  --mode grayscale \
+  --fps 15 \
+  --width 120 \
+  --height 40 \
+  --patch-sddm-theme \
+  --sddm-theme breeze \
+  --enable
 ```
 
 If you skip `--video`, script will install everything except frame assets.
@@ -94,6 +102,7 @@ sudo install -Dm644 packaging/video-session.env /etc/boot-ui/video-session.env
 sudo install -Dm644 packaging/boot-ui.service /etc/systemd/system/boot-ui.service
 sudo install -Dm644 packaging/boot-video-player.service /etc/systemd/system/boot-video-player.service
 sudo install -Dm644 packaging/boot-video-player.path /etc/systemd/system/boot-video-player.path
+sudo install -Dm755 packaging/patch-sddm-theme-video.sh /usr/bin/bootfx-patch-sddm-theme
 
 sudo systemctl daemon-reload
 ```
@@ -154,6 +163,41 @@ Optional: if you do not want graphical continuation yet, skip `boot-video-player
 
 To reduce default boot noise, add `quiet splash` to kernel parameters.
 
+## SDDM Video Background Continuation
+
+This mode updates SDDM theme config with the current `pts_ms` from boot handoff and lets SDDM play the same source video as background.
+
+### 1. Patch SDDM theme once
+
+```bash
+sudo /usr/bin/bootfx-patch-sddm-theme --enable --theme breeze --theme-root /usr/share/sddm/themes
+sudo /usr/bin/bootfx-patch-sddm-theme --status --theme breeze --theme-root /usr/share/sddm/themes
+```
+
+### 2. Enable `[sddm]` in config
+
+Edit `/etc/boot-ui/config.toml`:
+
+```toml
+[sddm]
+video_background_enabled = true
+theme = "breeze"
+theme_root = "/usr/share/sddm/themes"
+video_path = "/var/lib/boot-ui/intro/video.mp4"
+launch_external_player = false
+```
+
+Notes:
+- Set `launch_external_player = false` to use only SDDM background continuation (no separate `mpv` window from `boot-video-player`).
+- Set `launch_external_player = true` if you want to keep old behavior (external player launch) together with SDDM config updates.
+- `boot-video-player.service` is ordered `Before=display-manager.service` so SDDM config update can happen before greeter launch when timing allows.
+
+### 3. Rollback (restore original theme)
+
+```bash
+sudo /usr/bin/bootfx-patch-sddm-theme --disable --theme breeze --theme-root /usr/share/sddm/themes
+```
+
 ## Runtime Files
 
 - Config: `/etc/boot-ui/config.toml`
@@ -164,6 +208,8 @@ To reduce default boot noise, add `quiet splash` to kernel parameters.
 - Debug history buffer snapshot: `/var/log/boot-ui/boot-ui-history.log`
 - Debug export directory (project-local artifacts): `/var/lib/boot-ui/debug/`
 - Latest combined debug file: `/var/lib/boot-ui/debug/debug-latest.txt`
+- SDDM theme config override: `/usr/share/sddm/themes/<theme>/theme.conf.user`
+- SDDM theme backup (if patched): `/usr/share/sddm/themes/<theme>/Main.qml.bootfx.bak`
 
 Default config example:
 
@@ -190,6 +236,13 @@ write_state = "/run/boot-ui/state.json"
 source = "/var/lib/boot-ui/intro/video.mp4"
 player = "mpv"
 args = ["--fullscreen"]
+
+[sddm]
+video_background_enabled = false
+theme = "breeze"
+theme_root = "/usr/share/sddm/themes"
+video_path = "/var/lib/boot-ui/intro/video.mp4"
+launch_external_player = true
 
 [debug]
 log_file = "/var/log/boot-ui/boot-ui.log"
@@ -241,6 +294,7 @@ If animation did not play correctly, please send these files after one full boot
 /var/lib/boot-ui/debug/run-<latest>/boot-ui-history.log
 /run/boot-ui/state.json
 /var/lib/boot-ui/debug/run-<latest>/manifest.json
+/usr/share/sddm/themes/<theme>/theme.conf.user
 ```
 
 Also send command outputs:
@@ -295,6 +349,14 @@ sudo tar -czf /tmp/bootfx-debug-$(date +%F-%H%M%S).tar.gz \
     - `sudo systemctl restart boot-video-player.path`
   - Recheck:
     - `journalctl -u boot-video-player.service -b --no-pager`
+- SDDM background video does not start:
+  - Verify theme was patched:
+    - `sudo /usr/bin/bootfx-patch-sddm-theme --status --theme <theme> --theme-root /usr/share/sddm/themes`
+  - Verify `/etc/boot-ui/config.toml` has:
+    - `[sddm].video_background_enabled = true`
+    - correct `theme`, `theme_root`, and `video_path`
+  - Check `boot-video-player` logs for update message:
+    - `journalctl -u boot-video-player.service -b --no-pager | grep -i "SDDM background updated"`
 - `boot-video-player.path` / `boot-video-player.service` enters `start-limit-hit`:
   - Reset failed state and restart trigger:
     - `sudo systemctl reset-failed boot-video-player.service boot-video-player.path`
@@ -330,6 +392,7 @@ bootfx/
 |  |- boot-video-player.service
 |  |- boot-video-player.path
 |  |- video-session.env
+|  |- patch-sddm-theme-video.sh
 |  |- example-config.toml
 |  '- install-arch.sh
 |- assets/

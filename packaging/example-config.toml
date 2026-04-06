@@ -21,6 +21,13 @@ source = "/var/lib/boot-ui/intro/video.mp4"
 player = "mpv"
 args = ["--fullscreen"]
 
+[sddm]
+video_background_enabled = false
+theme = "breeze"
+theme_root = "/usr/share/sddm/themes"
+video_path = "/var/lib/boot-ui/intro/video.mp4"
+launch_external_player = true
+
 [debug]
 log_file = "/var/log/boot-ui/boot-ui.log"
 history_file = "/var/log/boot-ui/boot-ui-history.log"

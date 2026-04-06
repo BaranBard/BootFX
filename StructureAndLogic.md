@@ -298,3 +298,27 @@ RAII-обертка:
 4. Добавить тесты:
    - unit-тесты для парсинга/валидации config/manifest/state
    - smoke-тесты pipeline precompute -> boot-ui -> state.
+
+## 11. SDDM Video Background Mode (Boot Continuation)
+
+BootFX now supports optional SDDM background continuation, configured via `[sddm]` in `config.toml`.
+
+- `video_background_enabled`: when `true`, `boot-video-player` updates SDDM theme runtime config (`theme.conf.user`) with:
+  - `BootFXVideoEnabled=true`
+  - `BootFXVideoPath=<video path>`
+  - `BootFXStartMs=<handoff pts>`
+  - `BootFXUseVideoBackground=true`
+- `theme`, `theme_root`: select theme directory (`<theme_root>/<theme>`).
+- `video_path`: explicit video path for SDDM background (falls back to selected player video path when empty at runtime).
+- `launch_external_player`: keeps or disables normal post-boot player launch.
+
+Theme patching model:
+
+- `packaging/patch-sddm-theme-video.sh` is a one-time patch tool that injects a `Video` block into SDDM theme `Main.qml` and creates a backup `Main.qml.bootfx.bak`.
+- Arch installer installs this helper as `/usr/bin/bootfx-patch-sddm-theme`.
+
+Important behavior note:
+
+- Updating `theme.conf.user` and launching external player are both handled by `boot-video-player`.
+- For pure SDDM handoff flow, set `launch_external_player=false` in `[sddm]`.
+- `boot-video-player.service` is ordered before `display-manager.service` in packaging to allow early SDDM config update.

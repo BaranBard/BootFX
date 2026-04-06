@@ -16,6 +16,7 @@ pub struct Config {
     pub animation: AnimationConfig,
     pub handoff: HandoffConfig,
     pub video: VideoConfig,
+    pub sddm: SddmConfig,
     pub debug: DebugConfig,
 }
 
@@ -28,6 +29,7 @@ impl Default for Config {
             animation: AnimationConfig::default(),
             handoff: HandoffConfig::default(),
             video: VideoConfig::default(),
+            sddm: SddmConfig::default(),
             debug: DebugConfig::default(),
         }
     }
@@ -59,6 +61,15 @@ impl Config {
         }
         if self.handoff.write_state.trim().is_empty() {
             bail!("handoff.write_state must not be empty");
+        }
+        if self.sddm.theme.trim().is_empty() {
+            bail!("sddm.theme must not be empty");
+        }
+        if self.sddm.theme_root.trim().is_empty() {
+            bail!("sddm.theme_root must not be empty");
+        }
+        if self.sddm.video_background_enabled && self.sddm.video_path.trim().is_empty() {
+            bail!("sddm.video_path must not be empty when sddm.video_background_enabled=true");
         }
         if self.debug.log_file.trim().is_empty() {
             bail!("debug.log_file must not be empty");
@@ -178,6 +189,28 @@ impl Default for VideoConfig {
             source: "/var/lib/boot-ui/intro/video.mp4".to_string(),
             player: "mpv".to_string(),
             args: vec!["--fullscreen".to_string()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SddmConfig {
+    pub video_background_enabled: bool,
+    pub theme: String,
+    pub theme_root: String,
+    pub video_path: String,
+    pub launch_external_player: bool,
+}
+
+impl Default for SddmConfig {
+    fn default() -> Self {
+        Self {
+            video_background_enabled: false,
+            theme: "breeze".to_string(),
+            theme_root: "/usr/share/sddm/themes".to_string(),
+            video_path: "/var/lib/boot-ui/intro/video.mp4".to_string(),
+            launch_external_player: true,
         }
     }
 }

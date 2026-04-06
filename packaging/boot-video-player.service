@@ -1,9 +1,7 @@
 [Unit]
 Description=BootFX Graphical Video Continuation
-After=graphical.target
-After=display-manager.service
 After=boot-ui.service
-Wants=display-manager.service
+Before=display-manager.service
 ConditionPathExists=/run/boot-ui/state.json
 
 [Service]

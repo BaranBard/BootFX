@@ -12,6 +12,9 @@ WIDTH="120"
 HEIGHT="40"
 FPS="15"
 ENABLE_UNITS="0"
+PATCH_SDDM_THEME="0"
+SDDM_THEME="breeze"
+SDDM_THEME_ROOT="/usr/share/sddm/themes"
 
 usage() {
   cat <<'EOF'
@@ -26,6 +29,10 @@ Options:
   --width <n>         Character grid width (default: 120)
   --height <n>        Character grid height (default: 40)
   --fps <n>           Target FPS (default: 15)
+  --patch-sddm-theme  Patch SDDM theme Main.qml for BootFX video background.
+  --sddm-theme <name> SDDM theme name to patch (default: breeze)
+  --sddm-theme-root <path>
+                      SDDM themes root (default: /usr/share/sddm/themes)
   --enable            Enable systemd units after install.
   -h, --help          Show this help.
 EOF
@@ -51,6 +58,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fps)
       FPS="${2:-}"
+      shift 2
+      ;;
+    --patch-sddm-theme)
+      PATCH_SDDM_THEME="1"
+      shift
+      ;;
+    --sddm-theme)
+      SDDM_THEME="${2:-}"
+      shift 2
+      ;;
+    --sddm-theme-root)
+      SDDM_THEME_ROOT="${2:-}"
       shift 2
       ;;
     --enable)
@@ -83,15 +102,15 @@ if [[ -n "${VIDEO_INPUT}" ]]; then
   fi
 fi
 
-echo "[1/6] Building release binaries"
+echo "[1/7] Building release binaries"
 cargo build --release --workspace --manifest-path "${ROOT_DIR}/Cargo.toml"
 
-echo "[2/6] Installing binaries to /usr/bin"
+echo "[2/7] Installing binaries to /usr/bin"
 sudo install -Dm755 "${ROOT_DIR}/target/release/boot-ui" /usr/bin/boot-ui
 sudo install -Dm755 "${ROOT_DIR}/target/release/boot-ui-precompute" /usr/bin/boot-ui-precompute
 sudo install -Dm755 "${ROOT_DIR}/target/release/boot-video-player" /usr/bin/boot-video-player
 
-echo "[3/6] Installing config and systemd units"
+echo "[3/7] Installing config and systemd units"
 sudo install -d -m755 /etc/boot-ui
 if ! sudo test -f "${CONFIG_PATH}"; then
   sudo install -Dm644 "${ROOT_DIR}/packaging/example-config.toml" "${CONFIG_PATH}"
@@ -110,14 +129,15 @@ fi
 sudo install -Dm644 "${ROOT_DIR}/packaging/boot-ui.service" /etc/systemd/system/boot-ui.service
 sudo install -Dm644 "${ROOT_DIR}/packaging/boot-video-player.service" /etc/systemd/system/boot-video-player.service
 sudo install -Dm644 "${ROOT_DIR}/packaging/boot-video-player.path" /etc/systemd/system/boot-video-player.path
+sudo install -Dm755 "${ROOT_DIR}/packaging/patch-sddm-theme-video.sh" /usr/bin/bootfx-patch-sddm-theme
 
-echo "[4/6] Preparing asset directory"
+echo "[4/7] Preparing asset directory"
 sudo install -d -m755 "${ASSET_DIR}"
 sudo install -d -m755 /var/lib/boot-ui/debug
 sudo install -d -m755 /var/log/boot-ui
 
 if [[ -n "${VIDEO_INPUT}" ]]; then
-  echo "[5/6] Copying source video and precomputing ASCII frames"
+  echo "[5/7] Copying source video and precomputing ASCII frames"
   sudo install -Dm644 "${VIDEO_INPUT}" "${ASSET_DIR}/video.mp4"
   sudo /usr/bin/boot-ui-precompute \
     --input "${ASSET_DIR}/video.mp4" \
@@ -127,11 +147,21 @@ if [[ -n "${VIDEO_INPUT}" ]]; then
     --fps "${FPS}" \
     --mode "${MODE}"
 else
-  echo "[5/6] Skipping precompute (--video not provided)"
+  echo "[5/7] Skipping precompute (--video not provided)"
   echo "Run boot-ui-precompute manually when a source video is available."
 fi
 
-echo "[6/6] Reloading systemd"
+if [[ "${PATCH_SDDM_THEME}" == "1" ]]; then
+  echo "[6/7] Patching SDDM theme for BootFX video background"
+  sudo /usr/bin/bootfx-patch-sddm-theme \
+    --enable \
+    --theme "${SDDM_THEME}" \
+    --theme-root "${SDDM_THEME_ROOT}"
+else
+  echo "[6/7] Skipping SDDM theme patch (--patch-sddm-theme not provided)"
+fi
+
+echo "[7/7] Reloading systemd"
 sudo systemctl daemon-reload
 
 if [[ "${ENABLE_UNITS}" == "1" ]]; then
@@ -149,5 +179,14 @@ Install completed.
 Next checks:
   sudo boot-ui --config /etc/boot-ui/config.toml --max-frames 120
   sudo boot-video-player --config /etc/boot-ui/config.toml --dry-run
+
+SDDM video background notes:
+  - Theme patch tool installed as: /usr/bin/bootfx-patch-sddm-theme
+  - Enable in config:
+      [sddm]
+      video_background_enabled = true
+      launch_external_player = false
+  - Optional status check:
+      sudo /usr/bin/bootfx-patch-sddm-theme --status --theme <theme> --theme-root <theme-root>
 
 EOF

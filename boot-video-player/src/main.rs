@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
-use bootfx_core::{Config, State, DEFAULT_CONFIG_PATH, DEFAULT_STATE_PATH};
+use bootfx_core::{Config, SddmConfig, State, DEFAULT_CONFIG_PATH, DEFAULT_STATE_PATH};
 
 #[derive(Debug)]
 struct Args {
@@ -109,6 +109,36 @@ fn run() -> Result<()> {
     }
 
     let video_path = select_video_path(&args, &config)?;
+    if config.sddm.video_background_enabled {
+        let sddm_video_path = if config.sddm.video_path.trim().is_empty() {
+            video_path.clone()
+        } else {
+            PathBuf::from(config.sddm.video_path.clone())
+        };
+
+        if args.dry_run {
+            eprintln!(
+                "boot-video-player: dry-run: would update SDDM theme `{}` with video={} start_ms={}",
+                config.sddm.theme,
+                sddm_video_path.display(),
+                state.pts_ms
+            );
+        } else {
+            let conf_path =
+                update_sddm_theme_background(&config.sddm, &sddm_video_path, state.pts_ms)?;
+            eprintln!(
+                "boot-video-player: SDDM background updated: theme={}, conf={}",
+                config.sddm.theme,
+                conf_path.display()
+            );
+        }
+
+        if !config.sddm.launch_external_player {
+            eprintln!("boot-video-player: external player launch disabled by sddm.launch_external_player=false");
+            return Ok(());
+        }
+    }
+
     let player = choose_player(&config);
     let mut command = build_player_command(&player, &config.video.args, &video_path, state.pts_ms);
 
@@ -729,4 +759,103 @@ fn detect_wayland_display(runtime_dir: &str) -> Option<String> {
     }
 
     candidate
+}
+
+fn update_sddm_theme_background(
+    sddm: &SddmConfig,
+    video_path: &Path,
+    start_ms: u64,
+) -> Result<PathBuf> {
+    let theme_dir = Path::new(&sddm.theme_root).join(&sddm.theme);
+    if !theme_dir.is_dir() {
+        bail!(
+            "sddm theme directory does not exist: {}",
+            theme_dir.display()
+        );
+    }
+
+    let conf_user = theme_dir.join("theme.conf.user");
+    upsert_sddm_general_keys(
+        &conf_user,
+        &[
+            ("BootFXVideoEnabled", "true".to_string()),
+            (
+                "BootFXVideoPath",
+                video_path.as_os_str().to_string_lossy().to_string(),
+            ),
+            ("BootFXStartMs", start_ms.to_string()),
+            ("BootFXUseVideoBackground", "true".to_string()),
+        ],
+    )?;
+    Ok(conf_user)
+}
+
+fn upsert_sddm_general_keys(path: &Path, kv: &[(&str, String)]) -> Result<()> {
+    let original = fs::read_to_string(path).unwrap_or_default();
+    let mut lines: Vec<String> = if original.is_empty() {
+        Vec::new()
+    } else {
+        original.lines().map(|line| line.to_string()).collect()
+    };
+
+    let section = find_ini_section_bounds(&lines, "General");
+    if let Some((section_start, mut section_end)) = section {
+        for (key, value) in kv {
+            let mut updated = false;
+            for line in lines.iter_mut().take(section_end).skip(section_start + 1) {
+                if ini_line_key_equals(line, key) {
+                    *line = format!("{key}={value}");
+                    updated = true;
+                    break;
+                }
+            }
+            if !updated {
+                lines.insert(section_end, format!("{key}={value}"));
+                section_end += 1;
+            }
+        }
+    } else {
+        if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push("[General]".to_string());
+        for (key, value) in kv {
+            lines.push(format!("{key}={value}"));
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create SDDM theme dir: {}", parent.display()))?;
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    fs::write(path, out)
+        .with_context(|| format!("failed to write SDDM theme config: {}", path.display()))?;
+    Ok(())
+}
+
+fn find_ini_section_bounds(lines: &[String], section: &str) -> Option<(usize, usize)> {
+    let marker = format!("[{section}]");
+    let start = lines.iter().position(|line| line.trim() == marker)?;
+    let mut end = lines.len();
+    for (idx, line) in lines.iter().enumerate().skip(start + 1) {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            end = idx;
+            break;
+        }
+    }
+    Some((start, end))
+}
+
+fn ini_line_key_equals(line: &str, key: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('#') || trimmed.starts_with(';') {
+        return false;
+    }
+    if let Some((lhs, _)) = trimmed.split_once('=') {
+        return lhs.trim() == key;
+    }
+    false
 }

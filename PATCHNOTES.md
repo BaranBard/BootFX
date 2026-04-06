@@ -1,5 +1,32 @@
 # Patch Notes
 
+## 2026-04-06
+
+### Added
+
+- New `[sddm]` config section in `bootfx-core`:
+  - `video_background_enabled`
+  - `theme`
+  - `theme_root`
+  - `video_path`
+  - `launch_external_player`
+- New helper script `packaging/patch-sddm-theme-video.sh` for one-time SDDM theme patching (injects video block into `Main.qml`, creates backup).
+- Arch installer support for SDDM patch workflow:
+  - `--patch-sddm-theme`
+  - `--sddm-theme`
+  - `--sddm-theme-root`
+  - installs helper to `/usr/bin/bootfx-patch-sddm-theme`
+
+### Changed
+
+- `boot-video-player` now supports SDDM continuation mode:
+  - updates `<theme>/theme.conf.user` with BootFX keys (`BootFXVideoEnabled`, `BootFXVideoPath`, `BootFXStartMs`, `BootFXUseVideoBackground`)
+  - can skip external player launch when `sddm.launch_external_player=false`
+  - supports `--dry-run` reporting for planned SDDM update
+- `boot-video-player.service` ordering changed to run before `display-manager.service` (after `boot-ui.service`) so SDDM config updates can happen earlier in boot.
+- `README.md` updated with SDDM setup, rollback, and troubleshooting steps.
+- `StructureAndLogic.md` updated with SDDM continuation architecture notes.
+
 ## 2026-04-04
 
 ### Added
